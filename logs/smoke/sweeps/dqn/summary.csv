@@ -1,0 +1,2 @@
+algo,run_id,total_steps,hp_batch_size,hp_buffer_size,hp_exploration_fraction,hp_gamma,hp_learning_rate,hp_learning_starts,hp_seed,hp_target_update_interval,hp_train_freq,mean_reward,std_reward,success_rate,mean_final_health,water_used,episodes_to_converge
+dqn,dqn_smoke,5000,64,10000,0.3,0.99,0.001,500,0,500,4,-22.012323501482708,0.48527844031622075,0.0,0.0,0.315,30

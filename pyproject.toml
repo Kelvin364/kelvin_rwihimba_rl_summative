@@ -1,7 +1,7 @@
 [project]
-name = "kelvin-rl-summative"
+name = "kelvin_rwihimba_rl_summative"
 version = "0.1.0"
-description = "Add your description here"
+description = "AgriScout: RL for autonomous crop scouting (summative)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

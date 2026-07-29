@@ -1,0 +1,2 @@
+algo,run_id,total_steps,hp_batch_size,hp_ent_coef,hp_gae_lambda,hp_gamma,hp_learning_rate,hp_n_envs,hp_n_epochs,hp_n_steps,hp_seed,mean_reward,std_reward,success_rate,mean_final_health,water_used,episodes_to_converge
+ppo,ppo_smoke,5000,64,0.0,0.95,0.99,0.0003,4,4,256,0,-28.79232350148277,0.1318382377140007,0.0,0.0,0.0,24

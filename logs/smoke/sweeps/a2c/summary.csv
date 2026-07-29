@@ -1,0 +1,2 @@
+algo,run_id,total_steps,hp_ent_coef,hp_gae_lambda,hp_gamma,hp_learning_rate,hp_n_envs,hp_n_steps,hp_seed,mean_reward,std_reward,success_rate,mean_final_health,water_used,episodes_to_converge
+a2c,a2c_smoke,5000,0.0,1.0,0.99,0.0007,4,5,0,-21.847323501482713,0.17063201378319423,0.0,0.0,0.0,24

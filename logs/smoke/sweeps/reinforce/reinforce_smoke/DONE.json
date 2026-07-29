@@ -1,0 +1,26 @@
+{
+  "algo": "reinforce",
+  "run_id": "reinforce_smoke",
+  "total_steps": 5000,
+  "hparams": {
+    "learning_rate": 0.001,
+    "gamma": 0.99,
+    "baseline": "value",
+    "ent_coef": 0.01,
+    "hidden_sizes": [
+      128,
+      128
+    ],
+    "seed": 0
+  },
+  "eval_seeds": [
+    9000,
+    9019
+  ],
+  "mean_reward": -23.847323501482713,
+  "std_reward": 0.17063201378319423,
+  "success_rate": 0.0,
+  "mean_final_health": 0.0,
+  "water_used": 0.0,
+  "episodes_to_converge": 40
+}
