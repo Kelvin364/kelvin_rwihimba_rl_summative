@@ -9,7 +9,13 @@ tuned, trained and compared under an identical environment-step budget.
 per algorithm, the value-based vs policy-gradient comparison, generalization, and
 limitations.
 
-![learning curves](assets/figures/fig1_learning_curves.png)
+![the episode viewer](assets/figures/demo_viewer.png)
+
+*My episode viewer, showing the trained PPO agent mid-episode. The 3D field is on the
+left — taller, greener crops are healthier, red markers are pest hotspots, and the
+rover carries a locator ring. The panel on the right says what the agent is doing and
+why at that exact step, and the strip under the field is every action of the episode
+colour-coded by type. This run finished at +15.78 with 18 treatments and none wasted.*
 
 ---
 
@@ -100,6 +106,23 @@ only figure comparable across reward-function versions.
 PPO and DQN finish level. I treat the 0.1-point difference as a tie, not a ranking —
 it is far inside the variation I would expect from a different random seed.
 
+![final performance](assets/figures/fig2_final_comparison.png)
+
+*How the four algorithms finish, scored on twenty held-out seeds. I show both action
+modes because they disagree sharply: the three policy-gradient methods are all much
+better when their actions are sampled than when taken greedily, while DQN scores
+almost the same either way. DQN learns action values, so its argmax is over calibrated
+estimates and means something; a policy-gradient method optimises the sampled
+distribution and its argmax is only a by-product.*
+
+![learning curves per method](assets/figures/fig6_reward_subplots.png)
+
+*The same four runs as separate panels, with a shaded ±1σ band. The overlaid chart
+above is better for ranking them, but it hides how differently they behave while
+learning. DQN and PPO climb fastest and settle by roughly 250k steps; A2C has by far
+the widest band and swings hard late in training; REINFORCE is still climbing at 400k,
+where the others have long since flattened.*
+
 Three findings worth noting:
 
 1. **The policy-gradient methods are all far better sampled than greedy.** PPO scores
@@ -118,8 +141,8 @@ Three findings worth noting:
 
 ## The central finding: winnable ≠ learnable
 
-The first version of this environment (`archive/v0_unlearnable/`) **passed its
-scripted-oracle winnability gate and was still impossible to learn**. Across 40 sweep
+The first version of this environment **passed its scripted-oracle winnability gate
+and was still impossible to learn**. Across 40 sweep
 configurations and four 400k-step finals — roughly 8M environment steps — not one run
 recorded a single success, and three of four algorithms finished *worse than random*.
 
@@ -186,7 +209,6 @@ assets/demo/
   index.html            the generated viewer — one file, works offline
   vendor/three.min.js   three.js r160 (MIT, license alongside)
 analysis.py           figures + tables
-archive/v0_unlearnable/  the failed first reward, kept as the experimental control
 ```
 
 ## Reproducing

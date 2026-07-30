@@ -115,8 +115,7 @@ cannot be farmed. Coefficients were set from measured trajectory spread, not int
 
 ## 3. The central finding: winnable ≠ learnable
 
-The first reward function (`archive/v0_unlearnable/`) passed a scripted-oracle
-winnability gate — the oracle scored +17.03 with a 100% success rate — and was
+My first reward function passed a scripted-oracle winnability gate — the oracle scored +17.03 with a 100% success rate — and was
 nevertheless impossible to learn. Across 40 configurations and four 400k finals, about
 **8M environment steps, not one run recorded a single success**, and three of four
 algorithms finished *worse than random*.
