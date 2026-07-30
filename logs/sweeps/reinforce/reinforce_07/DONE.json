@@ -1,0 +1,36 @@
+{
+  "algo": "reinforce",
+  "run_id": "reinforce_07",
+  "total_steps": 250000,
+  "hparams": {
+    "learning_rate": 0.0005,
+    "gamma": 0.99,
+    "baseline": "value",
+    "ent_coef": 0.01,
+    "hidden_sizes": [
+      128,
+      128
+    ],
+    "episodes_per_batch": 4,
+    "normalize_advantage": true,
+    "max_grad_norm": 0.5,
+    "value_lr": 0.003,
+    "value_epochs": 5,
+    "seed": 7
+  },
+  "eval_seeds": [
+    9000,
+    9019
+  ],
+  "mean_reward": -22.746333011806477,
+  "std_reward": 4.549648377089881,
+  "success_rate": 0.0,
+  "mean_final_health": 0.46480861827731135,
+  "water_used": 0.05000000000000001,
+  "mean_reward_stochastic": -6.39027475408526,
+  "std_reward_stochastic": 5.0475118565243955,
+  "success_rate_stochastic": 0.0,
+  "mean_final_health_stochastic": 0.5579287573695183,
+  "water_used_stochastic": 0.9375000000000002,
+  "episodes_to_converge": 31
+}

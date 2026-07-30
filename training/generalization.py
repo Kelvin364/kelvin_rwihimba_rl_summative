@@ -46,10 +46,16 @@ def run_generalization() -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "results.csv"
 
+    # Both action-selection modes are reported. Scoring generalization on the
+    # deterministic policy alone understates every agent here -- their greedy argmax
+    # is much worse than sampling (PPO: -10.6 vs +5.5 on the same weights) -- so a
+    # deterministic-only table would describe a different policy than the one the
+    # demo actually runs.
     fields = [
         "algo", "seed_set", "n_seeds",
-        "mean_reward", "std_reward", "success_rate",
-        "mean_final_health", "water_used",
+        "mean_reward", "std_reward", "success_rate", "mean_final_health", "water_used",
+        "mean_reward_stochastic", "std_reward_stochastic", "success_rate_stochastic",
+        "mean_final_health_stochastic",
     ]
     rows = []
     for algo in ALGOS:
@@ -59,7 +65,8 @@ def run_generalization() -> Path:
             continue
         predictor = _load_predictor(algo, folder)
         for set_name, seeds in SEED_SETS.items():
-            m = evaluate(predictor, seeds)
+            m = evaluate(predictor, seeds, deterministic=True)
+            s = evaluate(predictor, seeds, deterministic=False)
             rows.append({
                 "algo": algo,
                 "seed_set": set_name,
@@ -69,11 +76,16 @@ def run_generalization() -> Path:
                 "success_rate": round(m["success_rate"], 4),
                 "mean_final_health": round(m["mean_final_health"], 4),
                 "water_used": round(m["water_used"], 4),
+                "mean_reward_stochastic": round(s["mean_reward"], 4),
+                "std_reward_stochastic": round(s["std_reward"], 4),
+                "success_rate_stochastic": round(s["success_rate"], 4),
+                "mean_final_health_stochastic": round(s["mean_final_health"], 4),
             })
             print(
                 f"[generalization] {algo:10s} {set_name:22s} "
-                f"reward={m['mean_reward']:.2f}±{m['std_reward']:.2f} "
-                f"success={m['success_rate']:.2f} health={m['mean_final_health']:.3f}",
+                f"det={m['mean_reward']:7.2f}+-{m['std_reward']:5.2f} succ={m['success_rate']:.2f} | "
+                f"stoch={s['mean_reward']:7.2f}+-{s['std_reward']:5.2f} succ={s['success_rate']:.2f} "
+                f"health={s['mean_final_health']:.3f}",
                 flush=True,
             )
 

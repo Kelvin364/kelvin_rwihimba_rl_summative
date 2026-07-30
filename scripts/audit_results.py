@@ -145,30 +145,42 @@ def audit() -> int:
     print()
 
     # --------------------------------------------------- per-algorithm best run
-    print("== BEST RUN PER ALGORITHM (by sweep mean_reward) ==")
-    print(f"{'algo':<10}{'best_run_id':<16}{'mean_reward':>14}{'success_rate':>14}")
+    # I rank by the BETTER of the two action-selection modes, which is the same rule
+    # training.run_all uses to choose the finals config. I originally ranked on the
+    # deterministic reward alone here, and this audit then reported different "best
+    # runs" than the ones my finals had actually trained.
+    print("== BEST RUN PER ALGORITHM (by best of det/stochastic sweep reward) ==")
+    print(f"{'algo':<10}{'best_run_id':<16}{'det':>10}{'stochastic':>12}{'success':>10}")
     _hr()
     for algo in ALGOS:
         algo_dir = root / "sweeps" / algo
-        best = None
+        best, best_score = None, None
         for done in algo_dir.glob("*/DONE.json"):
             try:
                 p = json.loads(done.read_text())
             except Exception:  # noqa: BLE001
                 continue
-            mr = p.get("mean_reward")
-            if mr is None or (isinstance(mr, float) and math.isnan(mr)):
+            det, sto = p.get("mean_reward"), p.get("mean_reward_stochastic")
+            vals = [float(v) for v in (det, sto)
+                    if v is not None and not (isinstance(v, float) and math.isnan(v))]
+            if not vals:
                 continue
-            if best is None or mr > best["mean_reward"]:
+            score = max(vals)
+            if best_score is None or score > best_score:
+                best_score = score
                 best = {"run_id": p.get("run_id", done.parent.name),
-                        "mean_reward": float(mr),
-                        "success_rate": p.get("success_rate")}
+                        "det": det, "stoch": sto,
+                        "success_rate": p.get("success_rate_stochastic",
+                                              p.get("success_rate"))}
         if best is None:
-            print(f"{algo:<10}{'(none)':<16}{'-':>14}{'-':>14}")
+            print(f"{algo:<10}{'(none)':<16}{'-':>10}{'-':>12}{'-':>10}")
             issues.append(f"sweeps/{algo}: no valid run to pick a best from")
         else:
-            print(f"{algo:<10}{best['run_id']:<16}{best['mean_reward']:>14.4f}"
-                  f"{(best['success_rate'] if best['success_rate'] is not None else float('nan')):>14.4f}")
+            nan = float("nan")
+            print(f"{algo:<10}{best['run_id']:<16}"
+                  f"{(best['det'] if best['det'] is not None else nan):>10.2f}"
+                  f"{(best['stoch'] if best['stoch'] is not None else nan):>12.2f}"
+                  f"{(best['success_rate'] if best['success_rate'] is not None else nan):>10.2f}")
     print()
 
     # ----------------------------------------------------------------- verdict

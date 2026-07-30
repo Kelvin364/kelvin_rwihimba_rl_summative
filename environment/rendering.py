@@ -1,23 +1,24 @@
-"""PyBullet GUI renderer + episode trace recorder for AgriScoutEnv.
+"""My PyBullet renderer for AgriScoutEnv (used by ``main.py`` in play mode).
 
 IMPORTANT
 ---------
-This module is imported ONLY when rendering is requested (e.g. ``main.py --render``
-or the episode viewer). It imports ``pybullet`` at module load time. Training code
-MUST NEVER import this module, so that training stays headless and Colab-safe.
+I import this module ONLY when rendering is actually requested, because it loads
+``pybullet`` at import time. Training code must never touch it, which is what keeps
+my training runs headless and portable.
 
-The renderer is deliberately decoupled from any concrete environment class. It reads
-a small, documented *render state contract* (see :class:`RenderStateProtocol`) off
-whatever object it is given. The real ``AgriScoutEnv`` only needs to expose those
-attributes; a lightweight mock is used by the smoke test.
+I deliberately decoupled the renderer from any concrete environment class: it reads a
+small documented *render state contract* (see :class:`RenderStateProtocol`) off
+whatever object it is handed. ``AgriScoutEnv`` only has to expose those attributes,
+and my smoke test passes in a lightweight mock instead.
 
 Coordinate layout
 ------------------
 * Grid cell ``(row, col)`` maps to world ``(x = (col + 1) * CELL, y = (row + 1) * CELL)``.
-* The depot pad sits at the world origin ``(0, 0)``, just outside the planted field.
-* Crop boxes have a fixed full height and are sunk into a thick ground slab so that
-  the *visible* height above ``z = 0`` equals ``health * CROP_MAX_H`` -- this lets us
-  animate height by moving a persistent body (cheap) instead of rebuilding geometry.
+* The depot pad is drawn on grid cell ``(0, 0)`` -- the same square where
+  RETURN_TO_DEPOT actually refills.
+* Crop stalks have a fixed full height and sit sunk into a thick ground slab, so the
+  *visible* height above ``z = 0`` tracks health. That lets me animate growth by
+  moving a persistent body, which is far cheaper than rebuilding geometry.
 """
 
 from __future__ import annotations
@@ -37,9 +38,11 @@ logger = logging.getLogger(__name__)
 
 # --- world / visual constants -------------------------------------------------
 CELL = 1.0                 # metres between crop-cell centres
-CROP_MAX_H = 0.9           # full height of a crop box (health == 1.0)
+CROP_MAX_H = 0.9           # full height of a crop stalk (health == 1.0)
 CROP_MIN_VIS = 0.06        # minimum visible sliver so dead cells are still placed
-CROP_HALF_XY = 0.32        # crop box half-width in x/y
+CROP_HALF_XY = 0.32        # canopy half-width in x/y
+STALK_HALF_XY = 0.07       # stalk half-width -- thin, so the canopy reads as foliage
+CANOPY_H = 0.22            # canopy slab thickness
 GROUND_THICK = 2.0         # thick slab so "buried" crop portions stay hidden
 PEST_MAX_R = 0.55          # pest disc radius at severity == 1.0
 PEST_DISC_H = 0.01
@@ -55,6 +58,9 @@ _C_RED = np.array([0.82, 0.12, 0.10])
 _C_IRRIGATED = np.array([0.20, 0.45, 1.0])   # blue tint for recently watered cells
 _C_WATER_BAR = [0.20, 0.45, 1.0, 1.0]
 _C_PEST_BAR = [1.0, 0.55, 0.05, 1.0]
+# Pest severity ramp: pale amber (light) -> deep red (severe).
+_C_PEST_LIGHT = np.array([0.98, 0.72, 0.18])
+_C_PEST_HEAVY = np.array([0.78, 0.06, 0.06])
 
 
 @runtime_checkable
@@ -135,13 +141,25 @@ class AgriScoutRenderer:
         p.setGravity(0, 0, 0)
         if self.gui:
             p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
+            # Shadows give the crops readable depth. Without them the field renders as
+            # flat coloured squares and the height differences are invisible.
+            p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1)
 
         self._crop_bodies: dict[tuple[int, int], int] = {}
-        self._pest_bodies: list[int] = []
+        self._canopy_bodies: dict[tuple[int, int], int] = {}
+        self._pest_bodies: dict[tuple[int, int], int] = {}
         self._debug_text_ids: dict[str, int] = {}
+
+        # Interpolation state (see _interpolate_pose).
+        self._prev_row = float(_getattr(env, "rover_row", 0.0))
+        self._prev_col = float(_getattr(env, "rover_col", 0.0))
+        self._prev_heading = float(_getattr(env, "rover_heading", 0.0))
+        self._render_row, self._render_col = self._prev_row, self._prev_col
+        self._render_heading = self._prev_heading
 
         self._build_static()
         self._build_crops()
+        self._build_pests()
         self._build_rover()
         self._setup_camera()
 
@@ -173,36 +191,116 @@ class AgriScoutRenderer:
         half_x = (self.n_cols + 2) * CELL / 2
         half_y = (self.n_rows + 2) * CELL / 2
         # Thick brown ground slab with its top face exactly at z = 0.
+        # Note to self: centre on (field_cx, field_cy), NOT half of it. I had this
+        # halved at first, which put the slab centre a quarter of the way in and left
+        # the far row and column of crops hanging off the edge in mid-air.
         self.ground_id = self._box(
             (half_x, half_y, GROUND_THICK / 2),
-            (0.45, 0.32, 0.18, 1.0),
-            (field_cx / 2, field_cy / 2, -GROUND_THICK / 2),
+            (0.42, 0.30, 0.17, 1.0),
+            (field_cx, field_cy, -GROUND_THICK / 2),
         )
-        # Grey depot pad at the world origin.
+        # Depot pad. RETURN_TO_DEPOT only refills at GRID cell (0, 0), so I draw the
+        # pad there. I originally drew it at the world origin, which put the marker one
+        # cell diagonally away from the square that actually refills.
+        dx, dy = _cell_world_xy(0, 0)
         self.depot_id = self._box(
-            (0.6 * CELL, 0.6 * CELL, 0.02),
-            (0.55, 0.55, 0.58, 1.0),
-            (0.0, 0.0, 0.011),
+            (0.5 * CELL, 0.5 * CELL, 0.02),
+            (0.62, 0.63, 0.66, 1.0),
+            (dx, dy, 0.012),
         )
+        # Hatched border so the depot square reads as a marked pad, not a grey tile.
+        for sx, sy in ((0.46, 0.0), (-0.46, 0.0), (0.0, 0.46), (0.0, -0.46)):
+            self._box(
+                (0.5 * CELL if sy else 0.04, 0.04 if sy else 0.5 * CELL, 0.03),
+                (0.95, 0.78, 0.15, 1.0),
+                (dx + sx, dy + sy, 0.02),
+            )
 
     def _build_crops(self) -> None:
+        """One stalk + one canopy per cell.
+
+        Both are fixed-height bodies that get *re-posed* rather than rebuilt, so
+        animating growth costs two resetBasePositionAndOrientation calls per cell.
+        """
         for r in range(self.n_rows):
             for c in range(self.n_cols):
                 x, y = _cell_world_xy(r, c)
-                bid = self._box(
-                    (CROP_HALF_XY, CROP_HALF_XY, CROP_MAX_H / 2),
+                self._crop_bodies[(r, c)] = self._box(
+                    (STALK_HALF_XY, STALK_HALF_XY, CROP_MAX_H / 2),
+                    (0.36, 0.26, 0.12, 1.0),
+                    (x, y, 0.0),
+                )
+                self._canopy_bodies[(r, c)] = self._box(
+                    (CROP_HALF_XY, CROP_HALF_XY, CANOPY_H / 2),
                     (*_C_GREEN, 1.0),
                     (x, y, 0.0),
                 )
-                self._crop_bodies[(r, c)] = bid
+
+    def _build_pests(self) -> None:
+        """One permanent disc per cell -- see :meth:`_update_pests`."""
+        for r in range(self.n_rows):
+            for c in range(self.n_cols):
+                vis = p.createVisualShape(
+                    p.GEOM_CYLINDER, radius=PEST_MAX_R, length=PEST_DISC_H,
+                    rgbaColor=[*_C_PEST_LIGHT, 0.4],
+                )
+                self._pest_bodies[(r, c)] = p.createMultiBody(
+                    baseMass=0, baseVisualShapeIndex=vis, basePosition=[0, 0, -5.0]
+                )
+
+    def _cyl(self, radius, length, rgba, pos, orn=(0, 0, 0, 1)):
+        vis = p.createVisualShape(
+            p.GEOM_CYLINDER, radius=radius, length=length, rgbaColor=list(rgba)
+        )
+        return p.createMultiBody(
+            baseMass=0, baseVisualShapeIndex=vis,
+            basePosition=list(pos), baseOrientation=list(orn),
+        )
 
     def _build_rover(self) -> None:
-        self.rover_id = self._box(ROVER_HALF, (0.15, 0.15, 0.17, 1.0), (0, 0, ROVER_HALF[2]))
-        self.arrow_id = self._box(
-            (ARROW_LEN / 2, 0.04, 0.04),
-            (0.95, 0.85, 0.1, 1.0),
-            (0, 0, ROVER_HALF[2]),
+        """A recognisable field machine, not a cube.
+
+        The rover is assembled from several bodies held in ``self._rover_parts`` as
+        (body_id, local offset, local orientation). Every part is re-posed together
+        in :meth:`_update_rover`, so the whole machine translates and rotates as one
+        without any physics or parenting.
+        """
+        self._rover_parts: list[tuple[int, tuple[float, float, float], tuple]] = []
+
+        def part(bid, offset, orn=(0, 0, 0, 1)):
+            self._rover_parts.append((bid, offset, orn))
+            return bid
+
+        # Chassis + dark instrument deck + solar panel.
+        self.rover_id = part(
+            self._box(ROVER_HALF, (0.94, 0.94, 0.92, 1.0), (0, 0, -10)),
+            (0.0, 0.0, 0.15),
         )
+        part(self._box((0.13, 0.11, 0.05), (0.18, 0.20, 0.25, 1.0), (0, 0, -10)),
+             (-0.02, 0.0, 0.30))
+        part(self._box((0.22, 0.16, 0.012), (0.08, 0.13, 0.24, 1.0), (0, 0, -10)),
+             (-0.01, 0.0, 0.36))
+
+        # Four wheels (cylinders laid on their side).
+        wheel_orn = p.getQuaternionFromEuler([math.pi / 2, 0, 0])
+        for dx, dy in ((0.19, 0.21), (0.19, -0.21), (-0.19, 0.21), (-0.19, -0.21)):
+            part(self._cyl(0.10, 0.06, (0.10, 0.10, 0.11, 1.0), (0, 0, -10), wheel_orn),
+                 (dx, dy, 0.10), wheel_orn)
+
+        # Forward sensor boom + cone: an unmistakable heading indicator.
+        boom_orn = p.getQuaternionFromEuler([0, math.pi / 2, 0])
+        part(self._cyl(0.02, 0.26, (0.62, 0.65, 0.70, 1.0), (0, 0, -10), boom_orn),
+             (0.34, 0.0, 0.22), boom_orn)
+        self.arrow_id = part(
+            self._box((0.09, 0.05, 0.05), (0.98, 0.78, 0.10, 1.0), (0, 0, -10)),
+            (0.50, 0.0, 0.22),
+        )
+        # Beacon: recoloured per action so the machine announces what it just did.
+        self.beacon_id = part(
+            self._box((0.05, 0.05, 0.05), (1.0, 1.0, 1.0, 1.0), (0, 0, -10)),
+            (-0.16, 0.0, 0.42),
+        )
+
         self.water_bar_id = self._box(
             (BAR_HALF_XY, BAR_HALF_XY, BAR_MAX_H / 2), _C_WATER_BAR, (0, 0, -10)
         )
@@ -226,14 +324,40 @@ class AgriScoutRenderer:
             cameraTargetPosition=target,
         )
 
+    # -- pose interpolation ----------------------------------------------------
+    def _interpolate_pose(self, alpha: float) -> None:
+        """Blend the drawn pose from the previous committed pose to the current one."""
+        env = self.env
+        row = float(_getattr(env, "rover_row", 0.0))
+        col = float(_getattr(env, "rover_col", 0.0))
+        heading = float(_getattr(env, "rover_heading", 0.0))
+
+        # Take the shortest way round so a W->E turn does not spin the long way.
+        delta = (heading - self._prev_heading + math.pi) % (2 * math.pi) - math.pi
+        self._render_row = self._prev_row + (row - self._prev_row) * alpha
+        self._render_col = self._prev_col + (col - self._prev_col) * alpha
+        self._render_heading = self._prev_heading + delta * alpha
+
+        if alpha >= 1.0:  # commit -- the next step interpolates from here
+            self._prev_row, self._prev_col = row, col
+            self._prev_heading = self._prev_heading + delta
+
     # -- per-frame update ------------------------------------------------------
-    def render(self) -> None:
+    def render(self, alpha: float = 1.0) -> None:
+        """Draw the current env state.
+
+        ``alpha`` in [0, 1] interpolates the rover between its previous and current
+        cell: call ``render(a)`` a handful of times per env step with a sweeping
+        from 0 to 1 and the rover glides instead of jumping. ``alpha=1`` (the
+        default) simply snaps to the current pose and commits it.
+        """
         env = self.env
         health = np.asarray(_getattr(env, "health_grid", np.ones((self.n_rows, self.n_cols))), dtype=float)
         pest = np.asarray(_getattr(env, "pest_grid", np.zeros((self.n_rows, self.n_cols))), dtype=float)
         irrig = _getattr(env, "irrigation_grid", np.zeros((self.n_rows, self.n_cols)))
         irrig = np.asarray(irrig, dtype=float)
 
+        self._interpolate_pose(float(np.clip(alpha, 0.0, 1.0)))
         self._update_crops(health, irrig)
         self._update_pests(pest)
         self._update_rover()
@@ -243,63 +367,85 @@ class AgriScoutRenderer:
         for (r, c), bid in self._crop_bodies.items():
             h = float(health[r, c])
             vis = CROP_MIN_VIS + h * (CROP_MAX_H - CROP_MIN_VIS)
-            # Sink the fixed-height box so the visible part above z=0 equals `vis`.
-            center_z = vis - CROP_MAX_H / 2
             x, y = _cell_world_xy(r, c)
-            p.resetBasePositionAndOrientation(bid, [x, y, center_z], [0, 0, 0, 1])
+            # Sink the fixed-height stalk so the visible part above z=0 equals `vis`.
+            p.resetBasePositionAndOrientation(
+                bid, [x, y, vis - CROP_MAX_H / 2], [0, 0, 0, 1]
+            )
+            # Canopy rides on top of the stalk, so healthy crops stand visibly taller.
+            p.resetBasePositionAndOrientation(
+                self._canopy_bodies[(r, c)], [x, y, vis], [0, 0, 0, 1]
+            )
 
             color = _health_color(h)
             timer = float(irrig[r, c]) if irrig.shape == health.shape else 0.0
             if timer > 0:
                 blend = min(1.0, timer / 10.0) * 0.6
                 color = color * (1 - blend) + _C_IRRIGATED * blend
-            p.changeVisualShape(bid, -1, rgbaColor=[color[0], color[1], color[2], 1.0])
+            p.changeVisualShape(
+                self._canopy_bodies[(r, c)], -1,
+                rgbaColor=[color[0], color[1], color[2], 1.0],
+            )
 
     def _update_pests(self, pest: np.ndarray) -> None:
-        # Pest disc radius must scale with severity; pybullet can't resize a shape
-        # in place, so we rebuild the (typically few) active discs each frame.
-        for bid in self._pest_bodies:
-            p.removeBody(bid)
-        self._pest_bodies.clear()
-        for r in range(self.n_rows):
-            for c in range(self.n_cols):
-                sev = float(pest[r, c])
-                if sev <= 0.02:
-                    continue
-                radius = PEST_MAX_R * min(1.0, sev)
-                x, y = _cell_world_xy(r, c)
-                vis = p.createVisualShape(
-                    p.GEOM_CYLINDER,
-                    radius=radius,
-                    length=PEST_DISC_H,
-                    rgbaColor=[0.9, 0.05, 0.05, 0.45],
-                )
-                bid = p.createMultiBody(
-                    baseMass=0, baseVisualShapeIndex=vis, basePosition=[x, y, 0.02]
-                )
-                self._pest_bodies.append(bid)
+        """Re-colour the persistent pest discs (one per cell).
+
+        I first destroyed and re-created these on every frame so the radius could track
+        severity, since pybullet cannot resize a primitive in place. That churned up to
+        n_rows*n_cols bodies per frame and visibly flickered. Now each cell owns one
+        permanent disc and I encode severity in colour and opacity instead -- pale
+        amber for a light infestation, deep red for a severe one. It is flicker-free
+        and readable at a glance. Cells below the threshold I park under the slab.
+        """
+        for (r, c), bid in self._pest_bodies.items():
+            sev = float(pest[r, c])
+            x, y = _cell_world_xy(r, c)
+            if sev <= 0.02:
+                p.resetBasePositionAndOrientation(bid, [x, y, -5.0], [0, 0, 0, 1])
+                continue
+            t = min(1.0, sev / 0.6)                    # 0 = faint, 1 = severe
+            color = _C_PEST_LIGHT + t * (_C_PEST_HEAVY - _C_PEST_LIGHT)
+            alpha = 0.30 + 0.55 * t
+            p.changeVisualShape(bid, -1, rgbaColor=[*color, alpha])
+            # Lift slightly with severity so overlapping discs stay distinguishable.
+            p.resetBasePositionAndOrientation(bid, [x, y, 0.02 + 0.01 * t], [0, 0, 0, 1])
 
     def _update_rover(self) -> None:
         env = self.env
-        row = float(_getattr(env, "rover_row", 0.0))
-        col = float(_getattr(env, "rover_col", 0.0))
-        heading = float(_getattr(env, "rover_heading", 0.0))
+        # Interpolated pose: `render()` may be called several times per env step
+        # (see AgriScoutRenderer.render's `alpha`), so the rover glides between
+        # cells instead of teleporting.
+        row, col = self._render_row, self._render_col
+        heading = self._render_heading
         x, y = _cell_world_xy(row, col)
+        cos_h, sin_h = math.cos(heading), math.sin(heading)
         quat = p.getQuaternionFromEuler([0, 0, heading])
-        p.resetBasePositionAndOrientation(self.rover_id, [x, y, ROVER_HALF[2]], quat)
 
-        # Heading arrow: offset forward from rover centre along the heading.
-        ax = x + math.cos(heading) * (ROVER_HALF[0] + ARROW_LEN / 2)
-        ay = y + math.sin(heading) * (ROVER_HALF[0] + ARROW_LEN / 2)
-        p.resetBasePositionAndOrientation(self.arrow_id, [ax, ay, ROVER_HALF[2]], quat)
+        for bid, (ox, oy, oz), local_orn in self._rover_parts:
+            # Rotate the part's local offset into world space about the rover's yaw.
+            wx = x + ox * cos_h - oy * sin_h
+            wy = y + ox * sin_h + oy * cos_h
+            orn = p.multiplyTransforms([0, 0, 0], quat, [0, 0, 0], local_orn)[1]
+            p.resetBasePositionAndOrientation(bid, [wx, wy, oz], orn)
+
+        # Beacon colour follows the last action, matching the HTML demo's encoding.
+        names = _getattr(env, "ACTION_NAMES", [])
+        last = int(_getattr(env, "last_action", -1))
+        action = names[last] if 0 <= last < len(names) else ""
+        colour = {
+            "IRRIGATE": [0.16, 0.47, 0.84, 1.0],
+            "SPRAY": [0.92, 0.41, 0.20, 1.0],
+            "RETURN_TO_DEPOT": [0.10, 0.69, 0.48, 1.0],
+        }.get(action, [0.60, 0.63, 0.67, 1.0])
+        p.changeVisualShape(self.beacon_id, -1, rgbaColor=colour)
 
         # Status bars float above the rover; encode level via the buried-fraction
         # trick against an invisible baseline (bar base pinned at rover top).
         water = float(np.clip(_getattr(env, "water", 0.0), 0.0, 1.0))
         pest = float(np.clip(_getattr(env, "pesticide", 0.0), 0.0, 1.0))
-        base_z = ROVER_HALF[2] * 2 + 0.02
-        self._place_bar(self.water_bar_id, x - 0.12, y, base_z, water)
-        self._place_bar(self.pest_bar_id, x + 0.12, y, base_z, pest)
+        base_z = ROVER_HALF[2] * 2 + 0.22
+        self._place_bar(self.water_bar_id, x - 0.14, y, base_z, water)
+        self._place_bar(self.pest_bar_id, x + 0.14, y, base_z, pest)
 
     def _place_bar(self, bid: int, x: float, y: float, base_z: float, level: float) -> None:
         fill = max(0.02, level) * BAR_MAX_H
@@ -348,68 +494,10 @@ class AgriScoutRenderer:
 # =============================================================================
 # Episode trace recorder
 # =============================================================================
-def _results_dir() -> Path:
-    return Path(os.environ.get("AGRISCOUT_RESULTS", "./logs"))
-
-
-def _grid_to_list(grid: np.ndarray, ndigits: int = 2) -> list[list[float]]:
-    """Downsample a 2D grid to nested lists of rounded floats to keep traces small."""
-    arr = np.asarray(grid, dtype=float)
-    return [[round(float(v), ndigits) for v in row] for row in arr]
-
-
-@dataclass
-class EpisodeRecorder:
-    """Serialises an episode to ``<AGRISCOUT_RESULTS>/traces/<run_id>.json``.
-
-    Schema::
-
-        {
-          "meta":   {"env_version": str, "model": str, "seed": int, ...},
-          "frames": [
-            {"t", "rover": {"x","y","heading"}, "battery", "water", "pesticide",
-             "health_grid", "pest_grid", "action", "reward", "cum_reward"}
-          ]
-        }
-    """
-
-    run_id: str
-    meta: dict[str, Any]
-
-    def __post_init__(self) -> None:
-        self.frames: list[dict[str, Any]] = []
-        self._cum_reward: float = 0.0
-
-    def record(self, env: Any, action: int, reward: float) -> None:
-        self._cum_reward += float(reward)
-        names = _getattr(env, "ACTION_NAMES", [])
-        action = int(action)
-        action_name = names[action] if 0 <= action < len(names) else str(action)
-        frame = {
-            "t": int(_getattr(env, "step_count", len(self.frames))),
-            "rover": {
-                "x": round(float(_getattr(env, "rover_col", 0.0)), 2),
-                "y": round(float(_getattr(env, "rover_row", 0.0)), 2),
-                "heading": round(float(_getattr(env, "rover_heading", 0.0)), 3),
-            },
-            "battery": round(float(_getattr(env, "battery", 0.0)), 3),
-            "water": round(float(_getattr(env, "water", 0.0)), 3),
-            "pesticide": round(float(_getattr(env, "pesticide", 0.0)), 3),
-            "health_grid": _grid_to_list(_getattr(env, "health_grid", np.zeros((0, 0)))),
-            "pest_grid": _grid_to_list(_getattr(env, "pest_grid", np.zeros((0, 0)))),
-            "action": action_name,
-            "reward": round(float(reward), 3),
-            "cum_reward": round(self._cum_reward, 3),
-        }
-        self.frames.append(frame)
-
-    def save(self, results_dir: str | os.PathLike | None = None) -> Path:
-        base = Path(results_dir) if results_dir is not None else _results_dir()
-        traces = base / "traces"
-        traces.mkdir(parents=True, exist_ok=True)
-        path = traces / f"{self.run_id}.json"
-        payload = {"meta": self.meta, "frames": self.frames}
-        tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(payload, separators=(",", ":")))
-        tmp.replace(path)  # atomic + idempotent
-        return path
+# Lives in environment.trace (numpy-only) so episodes can be recorded headlessly
+# without importing pybullet. Re-exported here for backwards compatibility.
+from environment.trace import (  # noqa: E402,F401
+    EpisodeRecorder,
+    _grid_to_list,
+    _results_dir,
+)

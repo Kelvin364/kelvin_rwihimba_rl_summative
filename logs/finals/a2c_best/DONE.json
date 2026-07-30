@@ -15,15 +15,15 @@
     9000,
     9019
   ],
-  "mean_reward": -9.730162236236714,
-  "std_reward": 2.0836182211126153,
-  "success_rate": 0.0,
-  "mean_final_health": 0.5060966081917286,
-  "water_used": 0.52,
-  "mean_reward_stochastic": -6.456919025651878,
-  "std_reward_stochastic": 2.647097992006969,
-  "success_rate_stochastic": 0.0,
-  "mean_final_health_stochastic": 0.5519111305475235,
-  "water_used_stochastic": 0.7225,
-  "episodes_to_converge": 535
+  "mean_reward": -4.651852998976069,
+  "std_reward": 15.476018506276795,
+  "success_rate": 0.4,
+  "mean_final_health": 0.7216080784797668,
+  "water_used": 0.017499999999999998,
+  "mean_reward_stochastic": 1.2005644564310693,
+  "std_reward_stochastic": 13.907823512929767,
+  "success_rate_stochastic": 0.45,
+  "mean_final_health_stochastic": 0.783902807533741,
+  "water_used_stochastic": 0.11499999999999999,
+  "episodes_to_converge": 585
 }

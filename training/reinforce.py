@@ -45,17 +45,37 @@ class REINFORCEAgent:
         self.gamma = float(hparams.get("gamma", 0.99))
         self.ent_coef = float(hparams.get("ent_coef", 0.0))
         self.baseline = str(hparams.get("baseline", "none"))
+        # Monte-Carlo policy gradients are high-variance by construction. My first
+        # version updated from a SINGLE episode, and after 150k steps the policy was
+        # still sitting at entropy 1.95 out of a 2.20 maximum -- essentially uniform,
+        # learning nothing. Averaging the gradient over several episodes fixed that.
+        self.episodes_per_batch = max(1, int(hparams.get("episodes_per_batch", 8)))
+        # I rescale advantages to unit scale so my learning rate is decoupled from
+        # the reward magnitude. This only divides, it never re-centres: if it did,
+        # the "none" and "mean" baselines would collapse into the same thing and the
+        # baseline comparison I am running would measure nothing.
+        self.normalize_advantage = bool(hparams.get("normalize_advantage", True))
+        # Clipping the gradient norm is what let me use a usable learning rate at
+        # all. Unclipped, every lr >= 3e-3 drove entropy to 0 within a few updates and
+        # froze the policy on a single action -- one run collapsed to always-WAIT.
+        self.max_grad_norm = float(hparams.get("max_grad_norm", 0.5))
+        # I give the critic its own learning rate and its own update count. When I
+        # fitted it jointly with the policy, one step per batch, its loss stuck at
+        # ~15, so `returns - V` was still basically raw returns and my "value"
+        # baseline was reducing no variance at all.
+        self.value_lr = float(hparams.get("value_lr", 3e-3))
+        self.value_epochs = max(1, int(hparams.get("value_epochs", 5)))
         hidden = list(hparams.get("hidden_sizes", [128, 128]))
         lr = float(hparams.get("learning_rate", 1e-3))
 
         torch.manual_seed(int(hparams.get("seed", 0)))
         self.policy = _mlp(obs_dim, n_actions, hidden)
-        params = list(self.policy.parameters())
+        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=lr)
         self.value = None
+        self.value_optimizer = None
         if self.baseline == "value":
             self.value = _mlp(obs_dim, 1, hidden)
-            params += list(self.value.parameters())
-        self.optimizer = torch.optim.Adam(params, lr=lr)
+            self.value_optimizer = torch.optim.Adam(self.value.parameters(), lr=self.value_lr)
 
     # -- inference (shared predict() contract with SB3 models) -----------------
     def predict(self, obs, deterministic: bool = True):
@@ -78,6 +98,9 @@ class REINFORCEAgent:
             "model": self.policy.state_dict(),
             "value": self.value.state_dict() if self.value is not None else None,
             "optimizer": self.optimizer.state_dict(),
+            "value_optimizer": (
+                self.value_optimizer.state_dict() if self.value_optimizer is not None else None
+            ),
             "steps_done": steps_done,
         }
 
@@ -86,6 +109,8 @@ class REINFORCEAgent:
         if self.value is not None and state.get("value") is not None:
             self.value.load_state_dict(state["value"])
         self.optimizer.load_state_dict(state["optimizer"])
+        if self.value_optimizer is not None and state.get("value_optimizer") is not None:
+            self.value_optimizer.load_state_dict(state["value_optimizer"])
         return int(state.get("steps_done", 0))
 
 
@@ -153,61 +178,81 @@ def train_reinforce(
 
     obs, _ = env.reset(seed=seed)
     while steps_done < total_steps:
-        # --- collect one episode ---
-        log_probs, entropies, rewards, values = [], [], [], []
-        obs, _ = env.reset()
-        done = False
-        ep_reward = 0.0
-        while not done:
-            obs_t = torch.as_tensor(obs, dtype=torch.float32).unsqueeze(0)
-            logits = agent.policy(obs_t)
-            dist = Categorical(logits=logits)
-            action = dist.sample()
-            log_probs.append(dist.log_prob(action))
-            entropies.append(dist.entropy())
-            if agent.value is not None:
-                values.append(agent.value(obs_t).squeeze(-1))
-            obs, reward, term, trunc, _ = env.step(int(action.item()))
-            rewards.append(reward)
-            ep_reward += reward
-            steps_done += 1
-            done = term or trunc
+        # --- collect a BATCH of episodes, then make one update ---
+        b_log_probs, b_entropies, b_returns, b_obs = [], [], [], []
+        for _ in range(agent.episodes_per_batch):
+            log_probs, entropies, rewards, obs_steps = [], [], [], []
+            obs, _ = env.reset()
+            done = False
+            ep_reward = 0.0
+            while not done:
+                obs_t = torch.as_tensor(obs, dtype=torch.float32).unsqueeze(0)
+                obs_steps.append(obs_t)
+                logits = agent.policy(obs_t)
+                dist = Categorical(logits=logits)
+                action = dist.sample()
+                log_probs.append(dist.log_prob(action))
+                entropies.append(dist.entropy())
+                obs, reward, term, trunc, _ = env.step(int(action.item()))
+                rewards.append(reward)
+                ep_reward += reward
+                steps_done += 1
+                done = term or trunc
 
-        # --- Monte-Carlo returns ---
-        returns = np.zeros(len(rewards), dtype=np.float32)
-        g = 0.0
-        for t in reversed(range(len(rewards))):
-            g = rewards[t] + agent.gamma * g
-            returns[t] = g
-        returns_t = torch.as_tensor(returns)
+            # --- Monte-Carlo returns for this episode ---
+            returns = np.zeros(len(rewards), dtype=np.float32)
+            g = 0.0
+            for t in reversed(range(len(rewards))):
+                g = rewards[t] + agent.gamma * g
+                returns[t] = g
 
-        log_probs_t = torch.cat(log_probs)
-        entropy_t = torch.cat(entropies).mean()
+            b_log_probs.append(torch.cat(log_probs))
+            b_entropies.append(torch.cat(entropies))
+            b_returns.append(torch.as_tensor(returns))
+            b_obs.append(torch.cat(obs_steps))
+
+            episode_idx += 1
+            ep_rewards.append(ep_reward)
+            ep_w.writerow([episode_idx, steps_done, round(ep_reward, 4)])
+            if steps_done >= total_steps:
+                break
+        ep_f.flush()
+
+        log_probs_t = torch.cat(b_log_probs)
+        entropy_t = torch.cat(b_entropies).mean()
+        returns_t = torch.cat(b_returns)
 
         value_loss_val = 0.0
         if agent.baseline == "value":
-            values_t = torch.cat(values)
-            advantages = returns_t - values_t.detach()
-            value_loss = nn.functional.mse_loss(values_t, returns_t)
+            obs_t_all = torch.cat(b_obs)
+            # Baseline from the CURRENT critic, then refit it for the next batch.
+            with torch.no_grad():
+                advantages = returns_t - agent.value(obs_t_all).squeeze(-1)
+            for _ in range(agent.value_epochs):
+                v_loss = nn.functional.mse_loss(agent.value(obs_t_all).squeeze(-1), returns_t)
+                agent.value_optimizer.zero_grad()
+                v_loss.backward()
+                nn.utils.clip_grad_norm_(agent.value.parameters(), agent.max_grad_norm)
+                agent.value_optimizer.step()
+            value_loss_val = float(v_loss.item())
         elif agent.baseline == "mean":
             advantages = returns_t - returns_t.mean()
-            value_loss = torch.tensor(0.0)
         else:  # "none"
             advantages = returns_t
-            value_loss = torch.tensor(0.0)
+
+        if agent.normalize_advantage:
+            # Scale only -- deliberately no re-centring, so "none"/"mean"/"value"
+            # remain genuinely different baselines rather than collapsing together.
+            advantages = advantages / (advantages.std() + 1e-8)
 
         policy_loss = -(log_probs_t * advantages).mean() - agent.ent_coef * entropy_t
-        loss = policy_loss + (0.5 * value_loss if agent.baseline == "value" else 0.0)
 
         agent.optimizer.zero_grad()
-        loss.backward()
+        policy_loss.backward()
+        nn.utils.clip_grad_norm_(agent.policy.parameters(), agent.max_grad_norm)
         agent.optimizer.step()
-        if agent.baseline == "value":
-            value_loss_val = float(value_loss.item())
 
         # --- logging (per update) ---
-        episode_idx += 1
-        ep_rewards.append(ep_reward)
         prog_w.writerow([
             steps_done,
             round(float(np.mean(ep_rewards[-100:])), 4),
@@ -216,8 +261,6 @@ def train_reinforce(
             round(value_loss_val, 4),
         ])
         prog_f.flush()
-        ep_w.writerow([episode_idx, steps_done, round(ep_reward, 4)])
-        ep_f.flush()
 
         # --- checkpoint every `checkpoint_freq` env steps ---
         if steps_done - last_ckpt >= checkpoint_freq:

@@ -1,0 +1,29 @@
+{
+  "algo": "a2c",
+  "run_id": "a2c_05",
+  "total_steps": 100000,
+  "hparams": {
+    "learning_rate": 0.0007,
+    "n_steps": 16,
+    "gamma": 0.99,
+    "gae_lambda": 1.0,
+    "ent_coef": 0.0,
+    "n_envs": 4,
+    "seed": 5
+  },
+  "eval_seeds": [
+    9000,
+    9019
+  ],
+  "mean_reward": -31.38004727506284,
+  "std_reward": 7.254623165604247,
+  "success_rate": 0.0,
+  "mean_final_health": 0.48078386262059214,
+  "water_used": 0.07499999999999998,
+  "mean_reward_stochastic": -12.41907368450006,
+  "std_reward_stochastic": 6.325121257572287,
+  "success_rate_stochastic": 0.0,
+  "mean_final_health_stochastic": 0.5760759294033051,
+  "water_used_stochastic": 0.9900000000000002,
+  "episodes_to_converge": 11
+}

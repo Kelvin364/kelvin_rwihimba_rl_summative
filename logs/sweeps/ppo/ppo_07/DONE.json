@@ -1,0 +1,31 @@
+{
+  "algo": "ppo",
+  "run_id": "ppo_07",
+  "total_steps": 100000,
+  "hparams": {
+    "learning_rate": 0.001,
+    "n_steps": 256,
+    "batch_size": 64,
+    "n_epochs": 10,
+    "gamma": 0.99,
+    "gae_lambda": 0.95,
+    "ent_coef": 0.05,
+    "n_envs": 4,
+    "seed": 7
+  },
+  "eval_seeds": [
+    9000,
+    9019
+  ],
+  "mean_reward": -10.527465265306326,
+  "std_reward": 12.15281017200391,
+  "success_rate": 0.15,
+  "mean_final_health": 0.6326616659760476,
+  "water_used": 0.7800000000000001,
+  "mean_reward_stochastic": 1.8271092621842513,
+  "std_reward_stochastic": 10.527496617153293,
+  "success_rate_stochastic": 0.35,
+  "mean_final_health_stochastic": 0.7031407713890075,
+  "water_used_stochastic": 0.9850000000000001,
+  "episodes_to_converge": 291
+}

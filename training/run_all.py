@@ -149,13 +149,29 @@ def run_sweeps() -> None:
 # ---------------------------------------------------------------------------
 # Finals: best config per algo, retrained at FINAL_STEPS
 # ---------------------------------------------------------------------------
+def _run_score(payload: dict) -> float:
+    """Rank a sweep run by its BETTER action-selection mode.
+
+    Ranking on the deterministic reward alone silently mis-selects: a stochastic
+    policy whose argmax is a near-tie can score far worse greedily than when
+    sampled (measured REINFORCE: -20.4 deterministic vs -4.6 stochastic on the same
+    weights). Selecting the finals config on the deterministic number would then
+    promote a config chosen by how bad its argmax is. Both modes are reported in
+    the finals, so both count here.
+    """
+    return max(
+        float(payload.get("mean_reward", -1e18)),
+        float(payload.get("mean_reward_stochastic", -1e18)),
+    )
+
+
 def _best_run_for_algo(algo: str) -> dict | None:
-    """Return the best sweep DONE.json payload (argmax mean_reward) for an algo."""
+    """Return the best sweep DONE.json payload for an algo (see :func:`_run_score`)."""
     algo_dir = results_root() / "sweeps" / algo
     best = None
     for done in algo_dir.glob("*/DONE.json"):
         payload = json.loads(done.read_text())
-        if best is None or payload.get("mean_reward", -1e18) > best.get("mean_reward", -1e18):
+        if best is None or _run_score(payload) > _run_score(best):
             best = payload
     return best
 
@@ -169,7 +185,9 @@ def run_finals() -> None:
         out_dir = results_root() / "finals" / f"{algo}_best"
         print(
             f"[finals] {algo}: best sweep run {best['run_id']} "
-            f"(mean_reward={best['mean_reward']:.2f}) -> retrain {FINAL_STEPS} steps",
+            f"(det={best.get('mean_reward', float('nan')):.2f}, "
+            f"stoch={best.get('mean_reward_stochastic', float('nan')):.2f}) "
+            f"-> retrain {FINAL_STEPS} steps",
             flush=True,
         )
         res = run_experiment(
@@ -181,19 +199,53 @@ def run_finals() -> None:
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Publish: copy the finals into models/ so the demo loads the trained agents
+# ---------------------------------------------------------------------------
+# main.py loads these fixed paths. I was copying the finals across by hand, which let
+# models/ drift out of step with logs/finals/ -- after I changed the observation space
+# it was still holding weights that no longer loaded. So publishing is a pipeline step.
+_MODEL_TARGETS = {
+    "dqn": ("dqn/dqn.zip", "model.zip"),
+    "ppo": ("pg/ppo.zip", "model.zip"),
+    "a2c": ("pg/a2c.zip", "model.zip"),
+    "reinforce": ("pg/reinforce.pt", "model.pt"),
+}
+
+
+def publish_models() -> None:
+    import shutil
+
+    for algo, (dest_rel, src_name) in _MODEL_TARGETS.items():
+        src = results_root() / "finals" / f"{algo}_best" / src_name
+        if not src.exists():
+            print(f"[publish] {algo}: no final model at {src}, skipping.", flush=True)
+            continue
+        dest = _REPO_ROOT / "models" / dest_rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        print(f"[publish] {algo}: {src} -> {dest.relative_to(_REPO_ROOT)}", flush=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="AgriScout training orchestrator")
-    parser.add_argument("--phase", choices=["sweeps", "finals", "all"], default="all")
+    parser.add_argument(
+        "--phase",
+        choices=["sweeps", "finals", "generalization", "publish", "all"],
+        default="all",
+    )
     args = parser.parse_args()
 
     if args.phase in ("sweeps", "all"):
         run_sweeps()
     if args.phase in ("finals", "all"):
         run_finals()
-    if args.phase == "all":
+    if args.phase in ("generalization", "all"):
         from training.generalization import run_generalization
 
         run_generalization()
+    if args.phase in ("publish", "all"):
+        publish_models()
 
 
 if __name__ == "__main__":

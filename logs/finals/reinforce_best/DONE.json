@@ -3,29 +3,34 @@
   "run_id": "reinforce_best",
   "total_steps": 400000,
   "hparams": {
-    "learning_rate": 0.001,
-    "gamma": 0.995,
-    "baseline": "none",
+    "learning_rate": 0.0005,
+    "gamma": 0.99,
+    "baseline": "value",
     "ent_coef": 0.01,
     "hidden_sizes": [
       128,
       128
     ],
-    "seed": 3
+    "episodes_per_batch": 4,
+    "normalize_advantage": true,
+    "max_grad_norm": 0.5,
+    "value_lr": 0.003,
+    "value_epochs": 5,
+    "seed": 7
   },
   "eval_seeds": [
     9000,
     9019
   ],
-  "mean_reward": -16.97641437015763,
-  "std_reward": 0.6343972566403235,
+  "mean_reward": -21.648981006747125,
+  "std_reward": 10.465952700676057,
   "success_rate": 0.0,
-  "mean_final_health": 0.4390647903084755,
+  "mean_final_health": 0.48908126428723336,
   "water_used": 0.0,
-  "mean_reward_stochastic": -16.86292571731439,
-  "std_reward_stochastic": 0.6674293322080658,
+  "mean_reward_stochastic": -8.420845718167097,
+  "std_reward_stochastic": 7.181987160353347,
   "success_rate_stochastic": 0.0,
-  "mean_final_health_stochastic": 0.439375901222229,
-  "water_used_stochastic": 0.0,
-  "episodes_to_converge": 1
+  "mean_final_health_stochastic": 0.572194641828537,
+  "water_used_stochastic": 0.8225000000000001,
+  "episodes_to_converge": 543
 }

@@ -13,15 +13,34 @@ from typing import Any
 SWEEP_STEPS = 100_000  # sweeps only need to RANK configs, not fully converge
 N_ENVS = 4  # for PPO / A2C (SubprocVecEnv)
 
+# The sweep's job is to rank configurations WITHIN one algorithm; the fair
+# cross-algorithm comparison happens in the finals, where every algorithm gets the
+# same FINAL_STEPS budget. Vanilla REINFORCE performs ~500 gradient updates per
+# 150k env steps against PPO's ~23,000, so at 100k steps its runs are still
+# indistinguishable noise and ranking them would be meaningless. It gets a longer
+# sweep budget so the ranking measures the hyper-parameters rather than the seed.
+SWEEP_STEPS_BY_ALGO = {"reinforce": 250_000}
+
+
+def sweep_steps(algo: str) -> int:
+    return SWEEP_STEPS_BY_ALGO.get(algo, SWEEP_STEPS)
+
 
 def _take(prod, n):
     return list(itertools.islice(prod, n))
 
 
 def _dqn_configs() -> list[dict[str, Any]]:
-    combos = _take(itertools.product([1e-3, 5e-4, 3e-4], [0.98, 0.99], [0.1, 0.2]), 10)
+    # I vary learning rate, discount and REPLAY BUFFER SIZE -- the three levers I
+    # found matter most for a value-based learner's stability here. Buffer size took
+    # the slot I first gave to exploration_fraction: when I swept that, it made no
+    # measurable difference (0.1 -> -5.75 vs 0.2 -> -5.61 mean reward). My shaped
+    # reward already gives a dense gradient, so the epsilon schedule is not the
+    # constraint on this agent.
+    combos = _take(itertools.product(
+        [1e-3, 5e-4, 3e-4], [0.98, 0.99], [50_000, 200_000]), 10)
     out = []
-    for i, (lr, gamma, expf) in enumerate(combos):
+    for i, (lr, gamma, buf) in enumerate(combos):
         out.append({
             "algo": "dqn",
             "run_id": f"dqn_{i:02d}",
@@ -29,12 +48,12 @@ def _dqn_configs() -> list[dict[str, Any]]:
             "hparams": {
                 "learning_rate": lr,
                 "gamma": gamma,
-                "buffer_size": 50_000,
+                "buffer_size": buf,
                 "learning_starts": 1_000,
                 "batch_size": 64,
                 "train_freq": 4,
                 "target_update_interval": 1_000,
-                "exploration_fraction": expf,
+                "exploration_fraction": 0.2,
                 "exploration_final_eps": 0.05,
                 "seed": i,
             },
@@ -90,19 +109,38 @@ def _a2c_configs() -> list[dict[str, Any]]:
 
 
 def _reinforce_configs() -> list[dict[str, Any]]:
-    combos = _take(itertools.product([1e-3, 5e-4], [0.99, 0.995], ["none", "mean", "value"]), 10)
+    # Grid spans the three variables that measurably mattered: the baseline (the
+    # variance-reduction question this algorithm exists to demonstrate), the
+    # learning rate, and how many episodes are averaged into one gradient step.
+    # `episodes_per_batch` trades gradient variance against update count and was
+    # decisive -- at 1 episode/update the policy sat at entropy 1.95 of a 2.20
+    # maximum after 150k steps, i.e. still essentially uniform.
+    combos = _take(itertools.product(
+        [1e-3, 5e-4], ["value", "mean", "none"], [2, 4]), 10)
     out = []
-    for i, (lr, gamma, baseline) in enumerate(combos):
+    for i, (lr, baseline, epb) in enumerate(combos):
         out.append({
             "algo": "reinforce",
             "run_id": f"reinforce_{i:02d}",
-            "total_steps": SWEEP_STEPS,
+            "total_steps": sweep_steps("reinforce"),
             "hparams": {
                 "learning_rate": lr,
-                "gamma": gamma,
+                "gamma": 0.99,
                 "baseline": baseline,
                 "ent_coef": 0.01,
                 "hidden_sizes": [128, 128],
+                "episodes_per_batch": epb,
+                # Scale-only advantage rescaling: divides by std, never re-centres,
+                # so `baseline` stays the real experimental variable.
+                "normalize_advantage": True,
+                # Without clipping every lr >= 3e-3 drove entropy to 0 within a few
+                # updates and froze the policy on a single action.
+                "max_grad_norm": 0.5,
+                # The critic needs its own optimizer and several steps per batch;
+                # fitted jointly at the policy's lr its loss never dropped below
+                # ~15, so `returns - V` was still effectively raw returns.
+                "value_lr": 3e-3,
+                "value_epochs": 5,
                 "seed": i,
             },
         })

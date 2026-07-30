@@ -1,13 +1,13 @@
-"""AgriScoutEnv -- a Gymnasium environment for autonomous crop scouting.
+"""AgriScoutEnv -- my Gymnasium environment for autonomous crop scouting.
 
-A rover drives over an 8x12 field of crop cells. Each cell has a *health* level
-and a *pest severity*. The rover carries finite battery, water and pesticide and
-must keep the field healthy (irrigate stressed cells, spray infested ones) while
-managing its resources and returning to the depot to refill.
+A rover drives over a 6x9 field of crop cells. Each cell carries a *health* level
+and a *pest severity*. The rover has finite battery, water and pesticide, and has to
+keep the field healthy -- irrigating stressed cells, spraying infested ones -- while
+managing those resources and returning to the depot to refill.
 
-This module is training-safe: it imports ONLY gymnasium + numpy. It must never
-import pybullet / rendering. The renderer reads the attributes exposed here (see
-``environment.rendering.RenderStateProtocol``).
+I keep this module training-safe: it imports ONLY gymnasium and numpy, and never
+pybullet or my renderer, so training stays headless. The renderer reads the
+attributes I expose here (see ``environment.rendering.RenderStateProtocol``).
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
-ENV_VERSION = "agriscout-v0"
+ENV_VERSION = "agriscout-v1"
 
 ACTION_NAMES = [
     "MOVE_N", "MOVE_S", "MOVE_E", "MOVE_W",
@@ -31,8 +31,9 @@ ACTION_NAMES = [
 SUCCESS_HEALTH = 0.60
 SUCCESS_PEST = 0.15
 
-# Pest dynamics (localized; moderate so success stays discriminative -- tuned so
-# the oracle gate passes with oracle-random >= 15 AND random success <= 0.30).
+# Pest dynamics. I keep hotspots localized and their growth moderate so that success
+# stays discriminative: I tuned these until my scripted oracle clears a random policy
+# by a wide margin while a random policy still almost never succeeds.
 N_HOTSPOTS = (3, 5)          # rng.integers(low, high) -> 3..4 hotspots
 HOTSPOT_SEVERITY = (0.3, 0.6)
 INFEST_THRESHOLD = 0.1       # a cell is "infested" above this
@@ -43,8 +44,8 @@ SPREAD_SEV_CAP = 0.5         # spread probability saturates -> growth is bounded
 SPREAD_SEED = 0.20           # severity a freshly-infected neighbour receives
 #                              (> INFEST_THRESHOLD so infections escalate)
 
-# Health dynamics (as in the oracle-passing version: a cleaned, irrigated field
-# can reach SUCCESS_HEALTH).
+# Health dynamics. I tuned these so a cleaned, irrigated field can actually reach
+# SUCCESS_HEALTH -- otherwise the task would be unwinnable by construction.
 BASE_DECAY = 0.0005          # passive per-step health loss on a clean cell
 PEST_DECAY_COEF = 0.02       # extra decay proportional to local pest severity
 IRRIGATED_DECAY_FACTOR = 0.3  # irrigated cells decay slower
@@ -56,23 +57,24 @@ LOW_PEST_RECOVER = 0.2       # a cell recovers when its local pest is below this
 IRRIGATE_BOOST = 0.2         # instant health added by an IRRIGATE action
 
 # --- ACTION-ATTRIBUTED REWARD ------------------------------------------------
-# The per-step reward is 100% attributable to the agent's OWN actions: natural
-# pest spread/growth and passive health decay do NOT enter the reward (they only
-# change the world state / success). This removes the uncontrollable per-step
-# noise that previously collapsed PPO to a single action.
+# I make the per-step reward attributable entirely to the agent's OWN actions:
+# natural pest spread and passive health decay change the world state and the success
+# check, but never the reward. Before I did this, that uncontrollable per-step noise
+# was collapsing PPO onto a single action.
 #
 #   r = REWARD_IRRIGATE_COEF * (health added at the treated cell by THIS irrigate)
 #     + REWARD_SPRAY_COEF    * (pest severity removed by THIS spray, incl. halving)
 #     - TIME_COST
-#     - FIELD_PRESSURE_COEF * mean_pest   (tiny smooth term: "farming" pest is
-#                                          never profitable)
 #     - waste penalties (clean-spray / overwater / empty-tank / wall-bump / depot)
+#     + potential-based shaping (see below)
 #   Terminal: + SUCCESS_BONUS on success, - DEATH_PENALTY on battery death.
 REWARD_IRRIGATE_COEF = 1.0
 REWARD_SPRAY_COEF = 0.6
-TIME_COST = 0.05
-FIELD_PRESSURE_COEF = 0.05
-SUCCESS_BONUS = 20.0
+# I keep TIME_COST small on purpose. The horizon is fixed at max_steps (the battery
+# cannot realistically die inside 150 steps), so a big time cost just adds a constant
+# ~-7.5 offset with no gradient attached to it -- all it does is drown the real signal.
+TIME_COST = 0.01
+SUCCESS_BONUS = 5.0
 DEATH_PENALTY = 2.0
 # Waste penalties.
 CLEAN_SPRAY_PENALTY = 0.05   # spraying a cell that is already clean
@@ -84,33 +86,79 @@ DEPOT_PENALTY = 0.02         # RETURN_TO_DEPOT while not at the depot
 # --- Potential-based reward shaping (Ng, Harada & Russell, 1999) --------------
 # F(s, a, s') = gamma * Phi(s') - Phi(s) is *policy-invariant*: it provably does
 # NOT change the set of optimal policies, so the oracle gate and reward semantics
-# remain valid. Phi rewards being close to the highest-priority work (nearest
-# active pest hotspot, else the lowest-health cell), giving a per-step gradient
-# TOWARD work that solves the navigation credit-assignment problem.
-NAV_SHAPING_COEF = 0.5       # ~+0.5 total per full approach (>> 0.05 time cost)
-NAV_SHAPING_GAMMA = 0.99
+# remain valid. Phi has two parts:
+#
+#   FIELD term  -- Phi_field = POT_HEALTH_COEF * mean_health
+#                            - POT_PEST_COEF   * mean_pest
+#     This is my success condition itself, made dense. In my first version I left it
+#     out, so a policy only learned whether it had succeeded once, at the very last
+#     step, from a single all-or-nothing bonus. When I measured it, the oracle-vs-
+#     random gap in the dense reward was 2.16 over 150 steps (0.014/step) against
+#     per-episode noise of sigma ~ 2-5 -- signal-to-noise below 1 -- and none of my
+#     agents ever learned anything. Because the shaping telescopes, the total field
+#     shaping an episode can earn is exactly Phi_field(s_T) - Phi_field(s_0): the
+#     agent is paid for the NET improvement it produces, and cycling Phi up and down
+#     sums to exactly zero (see SHAPING_GAMMA), so it cannot be farmed.
+#
+#   NAV term    -- rewards being close to the highest-priority work (nearest
+#     active pest hotspot, else the lowest-health cell), giving a per-step
+#     gradient TOWARD work that solves navigation credit assignment.
+#
+# I set the coefficients from the trajectory spread I measured on seeds 9000-9019:
+# health delta oracle-vs-random = +0.487, pest delta = -0.570. At 25/20 that gives a
+# ~24-point dense separation, which ``test_dense_reward_is_learnable`` holds me to.
+POT_HEALTH_COEF = 25.0
+POT_PEST_COEF = 20.0
+POT_NAV_COEF = 1.0           # per approach step: 1.0/15 = +0.067 >> 0.01 time cost
+# I use gamma = 1.0 so the shaping sum telescopes exactly over the episode. At
+# gamma = 0.99 a large positive Phi bleeds -0.01*Phi every step -- about -34 per
+# episode here, which would have re-drowned the signal I had just fixed. At 1.0 any
+# cycle in Phi also sums to exactly zero, so the agent cannot farm it.
+SHAPING_GAMMA = 1.0
 NAV_PEST_THRESHOLD = 0.15    # cells above this are "work to do"
+
+# --- Egocentric target features ----------------------------------------------
+# I flatten the grid into the observation, which destroys spatial adjacency: to
+# navigate from that alone, an MLP policy has to internally learn an argmax over
+# R*C cells AND a Manhattan distance, from an unstructured vector. I could see the
+# symptom in the action counts -- a PPO policy that had clearly started learning was
+# still spending MOVE_E 0.22 / MOVE_W 0.26, oscillating in place because it could
+# not work out which way to go.
+#
+# These 8 features state the navigation target directly. They are a pure function of
+# state I already expose in full (my scripted oracle computes the same argmax), so I
+# am not handing the agent privileged information -- I am only removing a
+# representation burden that has nothing to do with the control problem.
+# Signed offsets are mapped into [0, 1] with 0.5 == aligned, so the observation
+# space stays Box(0, 1).
+N_EGO_FEATURES = 8
 
 
 class AgriScoutEnv(gym.Env):
     """Discrete-action, fully-observable crop-scouting environment.
 
-    Observation (Box, float32 in [0, 1], length ``3*R*C + 6``):
+    Observation (Box, float32 in [0, 1], length ``3*R*C + 6 + N_EGO_FEATURES``,
+    which is 176 at the default 6x9 size):
         health grid | pest grid | irrigation timers/10 | rover row,col (norm)
-        | battery | water | pesticide | step fraction.
+        | battery | water | pesticide | step fraction | egocentric target features.
 
     Actions (Discrete 9): see :data:`ACTION_NAMES`.
 
-    Reward (per step): ACTION-ATTRIBUTED -- 100% determined by the agent's own
-    actions; natural pest spread/growth and passive health decay do NOT enter the
-    reward, only the world state::
+    Reward (per step): action-attributed. I make it depend only on what the agent
+    itself does; natural pest spread and passive health decay change the world but
+    never the reward, so the agent is not blamed for what it cannot control::
 
         r = 1.0 * (health added at the treated cell by THIS irrigate)
             + 0.6 * (pest severity removed by THIS spray, incl. neighbour halving)
-            - 0.05 (time) - 0.05 * mean_pest (field pressure) - waste penalties
-            + 0.5 * (0.99 * Phi(s') - Phi(s))   policy-invariant nav shaping
-            + 20.0 terminal bonus if the episode ends in success
+            - 0.01 (time) - waste penalties
+            + (Phi(s') - Phi(s))    policy-invariant shaping, where
+              Phi = 25 * mean_health - 20 * mean_pest + 1.0 * (-dist to work)
+            + 5.0 terminal bonus if the episode ends in success
             - 2.0 terminal penalty if the battery dies.
+
+    The shaping term is what makes the task learnable: it pays the agent
+    continuously for net progress toward the success condition instead of only
+    once, at the end, via a single all-or-nothing bonus.
     """
 
     metadata = {"render_modes": []}
@@ -124,7 +172,7 @@ class AgriScoutEnv(gym.Env):
         self.max_steps = max_steps
 
         self.action_space = spaces.Discrete(len(ACTION_NAMES))
-        obs_dim = 3 * n_rows * n_cols + 6
+        obs_dim = 3 * n_rows * n_cols + 6 + N_EGO_FEATURES
         self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(obs_dim,), dtype=np.float32)
 
         # Populated in reset().
@@ -171,14 +219,9 @@ class AgriScoutEnv(gym.Env):
         action_reward = self._apply_action(name)
         self._advance_world(name)
         # Policy-invariant potential-based shaping (Ng et al. 1999).
-        shaping = NAV_SHAPING_COEF * (NAV_SHAPING_GAMMA * self._potential() - phi_before)
+        shaping = SHAPING_GAMMA * self._potential() - phi_before
 
-        reward = (
-            action_reward
-            - TIME_COST
-            - FIELD_PRESSURE_COEF * float(self.pest_grid.mean())
-            + shaping
-        )
+        reward = action_reward - TIME_COST + shaping
 
         self.step_count += 1
         terminated = self.battery <= 0.0
@@ -204,10 +247,10 @@ class AgriScoutEnv(gym.Env):
         c = int(np.clip(round(self.rover_col), 0, self.n_cols - 1))
         return r, c
 
-    def _potential(self) -> float:
-        """Shaping potential Phi(s): negative normalized distance to the nearest
-        high-priority cell (nearest active pest hotspot, else the lowest-health
-        cell). Higher (closer to 0) = rover is nearer to useful work."""
+    def _nav_potential(self) -> float:
+        """Negative normalized distance to the nearest high-priority cell (nearest
+        active pest hotspot, else the lowest-health cell). Higher (closer to 0)
+        = rover is nearer to useful work."""
         r, c = self._cell()
         pest_cells = np.argwhere(self.pest_grid > NAV_PEST_THRESHOLD)
         if pest_cells.shape[0] > 0:
@@ -216,6 +259,19 @@ class AgriScoutEnv(gym.Env):
             tr, tc = np.unravel_index(int(np.argmin(self.health_grid)), self.health_grid.shape)
             d = abs(int(tr) - r) + abs(int(tc) - c)
         return -float(d) / (self.n_rows + self.n_cols)
+
+    def _potential(self) -> float:
+        """Shaping potential Phi(s) = field-state term + navigation term.
+
+        The field term is the success condition made dense; the nav term supplies
+        the per-step gradient toward work. See the constants block for the full
+        rationale and the measured coefficient derivation.
+        """
+        field = (
+            POT_HEALTH_COEF * float(self.health_grid.mean())
+            - POT_PEST_COEF * float(self.pest_grid.mean())
+        )
+        return field + POT_NAV_COEF * self._nav_potential()
 
     def _apply_action(self, name: str) -> float:
         """Apply the discrete action; return the ACTION-ATTRIBUTED reward.
@@ -334,6 +390,41 @@ class AgriScoutEnv(gym.Env):
         self.battery = max(0.0, self.battery - 0.002)  # passive idle drain
 
     # -- observation / info ----------------------------------------------------
+    def _ego_features(self) -> np.ndarray:
+        """Relative offsets to the two navigation targets (see N_EGO_FEATURES).
+
+        Layout: [has_hotspot, pest_dr, pest_dc, max_pest,
+                 health_dr, health_dc, health_here, pest_here]
+        Offsets are ``(delta / span + 1) / 2`` so 0.5 means "already aligned".
+        """
+        r, c = self._cell()
+
+        def _rel(tr: int, tc: int) -> tuple[float, float]:
+            dr = (tr - r) / max(1, self.n_rows - 1)
+            dc = (tc - c) / max(1, self.n_cols - 1)
+            return (dr + 1.0) / 2.0, (dc + 1.0) / 2.0
+
+        pest_cells = np.argwhere(self.pest_grid > NAV_PEST_THRESHOLD)
+        if pest_cells.shape[0] > 0:
+            # Nearest hotspot by Manhattan distance -- the same target the nav
+            # potential rewards approaching, so the two signals agree.
+            d = np.abs(pest_cells[:, 0] - r) + np.abs(pest_cells[:, 1] - c)
+            tr, tc = pest_cells[int(np.argmin(d))]
+            pest_dr, pest_dc = _rel(int(tr), int(tc))
+            has_hotspot = 1.0
+        else:
+            pest_dr = pest_dc = 0.5      # aligned == "nothing to go to"
+            has_hotspot = 0.0
+
+        hr, hc = np.unravel_index(int(np.argmin(self.health_grid)), self.health_grid.shape)
+        health_dr, health_dc = _rel(int(hr), int(hc))
+
+        return np.array([
+            has_hotspot, pest_dr, pest_dc, float(self.pest_grid.max()),
+            health_dr, health_dc,
+            float(self.health_grid[r, c]), float(self.pest_grid[r, c]),
+        ], dtype=np.float32)
+
     def _obs(self) -> np.ndarray:
         parts = [
             self.health_grid.ravel(),
@@ -347,6 +438,7 @@ class AgriScoutEnv(gym.Env):
                 self.pesticide,
                 self.step_count / self.max_steps,
             ], dtype=np.float32),
+            self._ego_features(),
         ]
         obs = np.concatenate(parts).astype(np.float32)
         return np.clip(obs, 0.0, 1.0)

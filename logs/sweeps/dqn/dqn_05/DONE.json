@@ -1,0 +1,32 @@
+{
+  "algo": "dqn",
+  "run_id": "dqn_05",
+  "total_steps": 100000,
+  "hparams": {
+    "learning_rate": 0.0005,
+    "gamma": 0.98,
+    "buffer_size": 200000,
+    "learning_starts": 1000,
+    "batch_size": 64,
+    "train_freq": 4,
+    "target_update_interval": 1000,
+    "exploration_fraction": 0.2,
+    "exploration_final_eps": 0.05,
+    "seed": 5
+  },
+  "eval_seeds": [
+    9000,
+    9019
+  ],
+  "mean_reward": -8.667820655757396,
+  "std_reward": 9.007805955330582,
+  "success_rate": 0.0,
+  "mean_final_health": 0.6404767394065857,
+  "water_used": 0.8250000000000002,
+  "mean_reward_stochastic": -5.770080149926875,
+  "std_reward_stochastic": 10.72329338162453,
+  "success_rate_stochastic": 0.05,
+  "mean_final_health_stochastic": 0.6951748624444007,
+  "water_used_stochastic": 0.8100000000000002,
+  "episodes_to_converge": 96
+}
