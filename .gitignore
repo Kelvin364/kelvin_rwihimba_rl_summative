@@ -1,14 +1,29 @@
 .claude/
 
-# Training outputs / results are large and reproducible -> keep out of git.
-logs/
+# --- Training outputs -------------------------------------------------------
+# logs/ is large & reproducible: keep it out of git EXCEPT the committed result
+# files (per-algo sweep summaries, finals DONE.json, generalization results).
+# NB: parent dirs must be re-included step-by-step to reach the files.
+logs/*
+!logs/sweeps/
+logs/sweeps/*
+!logs/sweeps/*/
+logs/sweeps/*/*
+!logs/sweeps/*/summary.csv
+!logs/finals/
+logs/finals/*
+!logs/finals/*/
+logs/finals/*/*
+!logs/finals/*/DONE.json
+!logs/generalization/
+logs/generalization/*
+!logs/generalization/results.csv
 
-# Model binaries are not committed by default...
+# --- Model binaries ---------------------------------------------------------
+# Not committed by default, EXCEPT the four final agents the marker loads.
 *.zip
 *.pt
 *.pth
-
-# ...EXCEPT the four final agents the marker needs from a fresh clone.
 !models/dqn/dqn.zip
 !models/pg/ppo.zip
 !models/pg/a2c.zip

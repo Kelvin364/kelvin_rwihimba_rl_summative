@@ -1,2 +1,0 @@
-algo,run_id,total_steps,hp_baseline,hp_ent_coef,hp_gamma,hp_hidden_sizes,hp_learning_rate,hp_seed,mean_reward,std_reward,success_rate,mean_final_health,water_used,episodes_to_converge
-reinforce,reinforce_smoke,5000,value,0.01,0.99,"[128, 128]",0.001,0,-23.847323501482713,0.17063201378319423,0.0,0.0,0.0,40
