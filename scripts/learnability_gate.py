@@ -1,10 +1,10 @@
-"""My learnability gate -- the cheap check I run BEFORE spending compute on a sweep.
+"""My learnability gate: the cheap check I run BEFORE spending compute on a sweep.
 
 ``tests/test_oracle.py`` proves a *scripted* policy can win. I learned the hard way
 that this is necessary but not sufficient: my first reward function passed the oracle
 gate and was still unlearnable, because ~90% of the oracle's advantage sat in a single
 terminal all-or-nothing bonus. I only found out after 40 sweep configs and four 400k
-finals -- roughly 8M environment steps -- in which not one run recorded a single
+finals, roughly 8M environment steps, in which not one run recorded a single
 success.
 
 So I added this gate to ask the question that actually matters: does a real LEARNING
@@ -43,11 +43,11 @@ GATE_SEEDS = list(range(9000, 9020))
 
 # I require the trained policy to beat random by at least this much. Random scores
 # about -13.9 and my oracle about +14.6, so the full span is ~28.5. I set the bar at
-# 8.0 -- a little under a third of the way -- because I want it to mean "this is
+# 8.0, a little under a third of the way, because I want it to mean "this is
 # unmistakably learning", not "this has solved the task".
 MIN_IMPROVEMENT = 8.0
 
-# Reasonable defaults per algorithm (not tuned -- tuning is the sweep's job).
+# Reasonable defaults per algorithm (not tuned, since tuning is the sweep's job).
 GATE_HPARAMS = {
     "ppo": {
         "learning_rate": 3e-4, "n_steps": 256, "batch_size": 64, "n_epochs": 10,
@@ -75,7 +75,7 @@ GATE_HPARAMS = {
 # slowness is a real property of the algorithm and not something I should tune away.
 # Per 150k env steps PPO performs ~23,000 gradient updates (n_steps 256 x 4 envs,
 # 10 epochs, minibatch 64); REINFORCE performs one update per batch of complete
-# episodes -- about 500. When I measured it, its 400k-step curve was still climbing
+# episodes, about 500. When I measured it, its 400k-step curve was still climbing
 # (-15.7 -> -3.2) at the point PPO had long since plateaued. Pretending 150k is a fair
 # comparison would just be measuring the budget, so I give it the finals budget.
 GATE_STEPS_BY_ALGO = {"reinforce": 400_000}
@@ -97,7 +97,7 @@ def run_gate(algo: str, steps: int, fresh: bool = True) -> dict[str, object]:
     if fresh and folder.exists():
         shutil.rmtree(folder)  # a stale DONE.json would silently skip training
 
-    print(f"\n{'=' * 68}\n{algo.upper()} learnability gate -- {steps:,} env steps\n{'=' * 68}",
+    print(f"\n{'=' * 68}\n{algo.upper()} learnability gate, {steps:,} env steps\n{'=' * 68}",
           flush=True)
     t0 = time.time()
     run_experiment(algo, run_id, GATE_HPARAMS[algo], steps)
@@ -142,7 +142,7 @@ def report(result: dict, rnd: dict[str, float]) -> bool:
           f"{sto['success_rate']:>10.2f}{sto['mean_final_health']:>10.3f}")
     print(f"\nimprovement over random ({mode}): {improvement:+.2f} "
           f"(need >= {MIN_IMPROVEMENT})")
-    print(f"VERDICT: {'PASS -- the agent is learning' if passed else 'FAIL -- no learning signal'}")
+    print(f"VERDICT: {'PASS: the agent is learning' if passed else 'FAIL: no learning signal'}")
     return passed
 
 
@@ -172,7 +172,7 @@ def main() -> int:
     for algo, ok in verdicts.items():
         print(f"  {algo:<12}{'PASS' if ok else 'FAIL'}")
     all_ok = all(verdicts.values())
-    print(f"\n{'ALL GATES PASSED -- safe to run the full sweep.' if all_ok else 'GATE FAILED -- fix the reward before spending compute on the sweep.'}")
+    print(f"\n{'ALL GATES PASSED: safe to run the full sweep.' if all_ok else 'GATE FAILED: fix the reward before spending compute on the sweep.'}")
     return 0 if all_ok else 1
 
 

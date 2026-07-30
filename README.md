@@ -25,10 +25,17 @@ colour-coded by type. This run finished at +15.78 with 18 treatments and none wa
 uv sync
 
 uv run python main.py --mode evaluate          # score all four agents + references
-uv run python main.py --agent dqn              # watch the best agent (PyBullet 3D)
-uv run python main.py --agent oracle           # watch the scripted upper bound
+uv run python main.py --agent dqn              # watch the best agent live (PyBullet)
+uv run python main.py --agent dqn --view web   # same run in the browser viewer
 uv run pytest -q                               # environment + learnability gates
 ```
+
+> **Two renderers, and they look different.** `--view pybullet` (the default) opens a
+> live 3D window that steps in time with the terminal output, so you can watch the
+> agent and read its per-step numbers together. `--view web` records the episode and
+> opens my browser viewer instead, which is the better-looking one (real lighting,
+> shadows, treatment effects, scrubbing) but is built after the run rather than
+> streamed live. The screenshot above is the browser viewer.
 
 **The HTML episode viewer is the demo to open first.** It renders the episode in
 WebGL (three.js) with a **3D** and a **Grid** view of the same recorded trace, and

@@ -1,8 +1,8 @@
-/* AgriScout — my WebGL field view (three.js r160).
+/* AgriScout: my WebGL field view (three.js r160).
  *
  * This renders the SAME recorded trace as the 2D grid, so the two views can never
  * disagree: both read `episodes[ep].frames[idx]`. I added the 3D view to make the
- * demo legible at a glance -- crop height and colour show field health, the rover is
+ * demo legible at a glance: crop height and colour show field health, the rover is
  * a recognisable machine rather than a cube, and treatments fire a visible effect at
  * the treated cell, so you can see WHAT the agent did and WHERE without reading
  * anything.
@@ -16,7 +16,7 @@ const Scene = (() => {
   let rows = 0, cols = 0, mounted = false, raf = null;
   let orbit = { az: -0.72, el: 0.92, dist: 15, auto: true, drag: false, px: 0, py: 0 };
   // Rover pose is interpolated toward its target so playback glides between cells
-  // instead of teleporting -- the single biggest "is this a demo or a debug view"
+  // instead of teleporting, which is the single biggest "demo or debug view"
   // difference at 110ms/step.
   let pose = { x: 0, z: 0, tx: 0, tz: 0, yaw: 0, tyaw: 0 };
   const V = new THREE.Vector3(), M = new THREE.Matrix4(), Q = new THREE.Quaternion();
@@ -55,7 +55,7 @@ const Scene = (() => {
       new THREE.MeshStandardMaterial({ color: 0x2f3440, metalness: 0.5, roughness: 0.35 }));
     deck.position.set(-0.04, 0.34, 0); deck.castShadow = true; g.add(deck);
 
-    // Solar panel — reads instantly as "field robot".
+    // Solar panel, which reads instantly as "field robot".
     const panel = new THREE.Mesh(
       new THREE.BoxGeometry(0.46, 0.02, 0.32),
       new THREE.MeshStandardMaterial({ color: 0x14213d, metalness: 0.75, roughness: 0.18 }));
@@ -69,7 +69,7 @@ const Scene = (() => {
       w.rotation.x = Math.PI / 2; w.position.set(dx, 0.11, dz); w.castShadow = true; g.add(w);
     }
 
-    // Forward sensor boom — doubles as an unmistakable heading indicator.
+    // Forward sensor boom, which doubles as an unmistakable heading indicator.
     const boom = new THREE.Mesh(
       new THREE.CylinderGeometry(0.022, 0.022, 0.3, 10),
       new THREE.MeshStandardMaterial({ color: 0x9aa0aa, metalness: 0.6, roughness: 0.4 }));
@@ -124,7 +124,7 @@ const Scene = (() => {
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(42, 16 / 9, 0.1, 200);
 
-    // Keep fill well under the key light -- a strong hemisphere fill erases the
+    // Keep fill well under the key light, because a strong hemisphere fill erases the
     // shadows that make crop height readable.
     scene.add(new THREE.HemisphereLight(t.dark ? 0x33405c : 0xbfd9ff,
                                         t.dark ? 0x0b0b0a : 0x6b5b40, t.dark ? 0.9 : 0.85));
@@ -161,7 +161,7 @@ const Scene = (() => {
       f.position.set(0, 0.005, wz(r)); f.receiveShadow = true; scene.add(f);
     }
 
-    // Depot pad at grid (0,0) — where RETURN_TO_DEPOT actually refills.
+    // Depot pad at grid (0,0), where RETURN_TO_DEPOT actually refills.
     const pad = new THREE.Mesh(
       new THREE.BoxGeometry(0.92, 0.04, 0.92),
       new THREE.MeshStandardMaterial({ color: t.depot, roughness: 0.5, metalness: 0.1 }));
@@ -189,7 +189,7 @@ const Scene = (() => {
       scene.add(m);
     }
 
-    // Pooled effect rings — reused, never allocated mid-playback.
+    // Pooled effect rings, reused and never allocated mid-playback.
     ringPool = [];
     for (let i = 0; i < 6; i++) {
       const ring = new THREE.Mesh(
@@ -255,7 +255,7 @@ const Scene = (() => {
                   SCALE.set(1, stalkH, 1));
         cropStalks.setMatrixAt(i, M);
         // Canopy: height AND size track health, so the field's state is legible in
-        // silhouette alone -- not only by colour.
+        // silhouette alone, not only by colour.
         const s = 0.42 + h * 0.72;
         M.compose(V.set(wx(c), stalkH + 0.16 * s, wz(r)), Q.identity(),
                   SCALE.set(s, s * 0.82, s));

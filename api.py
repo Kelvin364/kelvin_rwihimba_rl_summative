@@ -1,4 +1,4 @@
-"""AgriScout serving API — the environment and trained agents behind HTTP/JSON.
+"""AgriScout serving API: the environment and trained agents behind HTTP/JSON.
 
 Shows the path from "research artifact" to "product component": the same trained
 policies the report evaluates are exposed as a stateless inference endpoint and a
@@ -106,7 +106,7 @@ def _act(agent: str, predictor, env: AgriScoutEnv, obs, deterministic: bool) -> 
 
 def _frame(env: AgriScoutEnv, action: int, reward: float, cum: float,
            grids: bool = True) -> dict[str, Any]:
-    """One step of state as JSON — the same shape the trace recorder writes."""
+    """One step of state as JSON, in the same shape the trace recorder writes."""
     r, c = int(round(env.rover_row)), int(round(env.rover_col))
     out: dict[str, Any] = {
         "t": int(env.step_count),
@@ -175,7 +175,7 @@ def agents() -> dict[str, Any]:
 
 @app.post("/episode")
 def run_episode(req: EpisodeRequest) -> dict[str, Any]:
-    """Run a full episode and return every frame — enough to replay it client-side."""
+    """Run a full episode and return every frame, enough to replay it client-side."""
     env = AgriScoutEnv()
     predictor = _predictor(req.agent)
     obs, _ = env.reset(seed=req.seed)
@@ -238,7 +238,7 @@ def step_session(sid: str) -> dict[str, Any]:
 
 @app.post("/session/{sid}/act")
 def act_session(sid: str, req: ActRequest) -> dict[str, Any]:
-    """Advance one step with a CLIENT-chosen action — lets a UI drive manually."""
+    """Advance one step with a CLIENT-chosen action, letting a UI drive manually."""
     s = _session(sid)
     if s["done"]:
         raise HTTPException(409, "episode already finished; open a new session")
@@ -266,7 +266,7 @@ def close_session(sid: str) -> dict[str, str]:
 
 @app.get("/")
 def demo() -> FileResponse:
-    """The bundled viewer — a worked example of a frontend consuming this API."""
+    """The bundled viewer, a worked example of a frontend consuming this API."""
     page = REPO / "assets" / "demo" / "index.html"
     if not page.exists():
         raise HTTPException(404, "build it: uv run python scripts/make_demo_html.py")

@@ -1,4 +1,4 @@
-"""Record an episode to a JSON trace -- headless, no pybullet, no display.
+"""Record an episode to a JSON trace, headless, with no pybullet and no display.
 
 Feeds ``scripts/make_demo_html.py``. Works for any trained agent plus the two
 scripted reference policies, so the demo can show a trained agent next to the

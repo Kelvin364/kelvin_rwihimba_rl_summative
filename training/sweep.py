@@ -213,13 +213,13 @@ def _episodes_to_converge(folder: Path) -> int:
     Threshold = start + 0.8 * (final - start), where `start` is the first rolling
     value and `final` the last.
 
-    I started with the obvious definition -- "80% of the final rolling mean" -- which
+    I started with the obvious definition, "80% of the final rolling mean", which
     is invalid whenever rewards are negative, because 0.8x a negative number is
     GREATER than it. The threshold is then cleared at episode 1 and the metric claims
     convergence before any learning has happened. That is exactly what I got at first:
     DQN "converged" at episode 4 and REINFORCE at episode 1. Measuring against the
     improvement RANGE instead is sign-independent and reports what I actually want to
-    know -- how quickly a run captured most of its gain.
+    know: how quickly a run captured most of its gain.
     """
     path = folder / "episode_rewards.csv"
     if not path.exists():
@@ -237,7 +237,7 @@ def _episodes_to_converge(folder: Path) -> int:
         for i in range(n)
     ]
     start, final = rolling[0], rolling[-1]
-    if final <= start:  # never improved -- report "did not converge"
+    if final <= start:  # never improved, so report "did not converge"
         return n
     threshold = start + 0.8 * (final - start)
     for i, val in enumerate(rolling):

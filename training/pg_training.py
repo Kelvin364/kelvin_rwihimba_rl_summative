@@ -1,4 +1,4 @@
-"""Policy-gradient training entry point — REINFORCE, PPO and A2C.
+"""Policy-gradient training entry point for REINFORCE, PPO and A2C.
 
 Shares the exact training/evaluation machinery used by DQN (:mod:`training.sweep`),
 so value-based and policy-gradient results are directly comparable: same environment,

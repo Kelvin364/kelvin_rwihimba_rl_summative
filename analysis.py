@@ -1,8 +1,8 @@
 """Generate report assets from the AgriScout training results.
 
 Reads $AGRISCOUT_RESULTS (default ./logs) and writes:
-  assets/figures/  -- 5 figures (PNG)
-  assets/tables/   -- 4 per-algo hyperparameter tables + best_summary (CSV + MD)
+  assets/figures/  : 9 figures (PNG)
+  assets/tables/   : 4 per-algo hyperparameter tables + best_summary (CSV + MD)
 
     uv run python analysis.py
 
@@ -43,7 +43,7 @@ LABELS = {"dqn": "DQN", "ppo": "PPO", "a2c": "A2C", "reinforce": "REINFORCE"}
 COLORS = {"dqn": "#2a78d6", "ppo": "#eb6834", "a2c": "#1baf7a", "reinforce": "#e34948"}
 MARKERS = {"dqn": "o", "ppo": "s", "a2c": "^", "reinforce": "D"}
 
-# Reference policies (oracle benchmark, seeds 9000-9019) -- see tests/test_oracle.py.
+# Reference policies (oracle benchmark, seeds 9000-9019), defined in tests/test_oracle.py.
 # I compute these from the live environment instead of writing the numbers in by hand.
 # I had them hard-coded at first, and when I changed the reward function the stale pair
 # stayed put and would have mislabelled the reference line on every figure. I cache
@@ -211,7 +211,7 @@ def fig_learning_curves(curves, out: Path):
     ax.set_xlabel("environment steps")
     ax.set_ylabel("episode reward (50-episode rolling mean)")
     _steps_axis(ax)
-    ax.set_title("Learning curves — 400k-step finals", color=INK, loc="left", fontweight="bold")
+    ax.set_title("Learning curves: 400k-step finals", color=INK, loc="left", fontweight="bold")
     # Opaque frame: at "upper center" with no frame the legend text sat directly on
     # the oracle reference line.
     ax.legend(loc="lower right", ncol=2, frameon=True, facecolor=SURFACE,
@@ -243,7 +243,7 @@ def fig_final_comparison(finals, out: Path):
     ax.set_xticks(x)
     ax.set_xticklabels([LABELS[a] for a in ALGOS])
     ax.set_ylabel("mean eval reward (seeds 9000-9019)")
-    ax.set_title("Final agent performance — deterministic vs stochastic",
+    ax.set_title("Final agent performance: deterministic vs stochastic",
                  color=INK, loc="left", fontweight="bold")
     ax.legend(frameon=False, loc="lower left")
     fig.tight_layout()
@@ -286,7 +286,7 @@ def fig_generalization(gen, out: Path):
     ax.set_xticks(x)
     ax.set_xticklabels([LABELS[a] for a in ALGOS])
     ax.set_ylabel("mean reward ± std (stochastic)")
-    ax.set_title("Generalization — held-out vs training-distribution seeds",
+    ax.set_title("Generalization: held-out vs training-distribution seeds",
                  color=INK, loc="left", fontweight="bold")
     ax.legend(frameon=False, loc="lower left")
     fig.tight_layout()
@@ -308,7 +308,7 @@ def fig_hparam_sensitivity(sweeps, out: Path):
         ax.set_title(LABELS[algo], color=COLORS[algo], loc="left", fontweight="bold")
         ax.set_xlabel("learning rate (log)")
         ax.set_ylabel("stochastic eval reward")
-    fig.suptitle("Hyperparameter sensitivity — sweep configs (learning rate)",
+    fig.suptitle("Hyperparameter sensitivity across sweep configs (learning rate)",
                  color=INK, x=0.02, ha="left", fontweight="bold", fontsize=13)
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     fig.savefig(out, dpi=150)
@@ -339,7 +339,7 @@ def fig_health(finals, out: Path):
     ax.set_xticks(x)
     ax.set_xticklabels([LABELS[a] for a in ALGOS])
     ax.set_ylabel("mean final field health")
-    ax.set_title("Final field health — graceful, but below the success threshold",
+    ax.set_title("Final field health: graceful, but below the success threshold",
                  color=INK, loc="left", fontweight="bold")
     ax.legend(frameon=False, loc="upper right")
     fig.tight_layout()
@@ -367,7 +367,7 @@ def fig_reward_subplots(curves, out: Path):
         ax.axhline(ORACLE_BASELINE, color="#006300", ls=":", lw=1, zorder=1)
         final = roll.iloc[-1]
         pct = 100 * (final - RANDOM_BASELINE) / (ORACLE_BASELINE - RANDOM_BASELINE)
-        ax.set_title(f"{LABELS[algo]}  —  final {final:.1f}  ({pct:.0f}% of oracle)",
+        ax.set_title(f"{LABELS[algo]}:  final {final:.1f}  ({pct:.0f}% of oracle)",
                      color=COLORS[algo], loc="left", fontweight="bold", fontsize=11)
         _style(ax)
     for ax in axes[1]:
@@ -375,7 +375,7 @@ def fig_reward_subplots(curves, out: Path):
         _steps_axis(ax)
     for ax in axes[:, 0]:
         ax.set_ylabel("episode reward (50-ep mean ± 1σ)")
-    fig.suptitle("Cumulative reward per method — shaded band is the 50-episode rolling σ "
+    fig.suptitle("Cumulative reward per method, with the 50-episode rolling σ shaded "
                  "(dashed = random, dotted = oracle)",
                  color=INK, x=0.02, ha="left", fontweight="bold", fontsize=12.5)
     fig.tight_layout(rect=(0, 0, 1, 0.96))
@@ -397,8 +397,8 @@ def fig_dqn_objective(progress, out: Path):
             a2.plot(x, df["rollout/exploration_rate"], color=COLORS["dqn"], lw=2)
             a2.set_ylabel("exploration rate ε")
             a2.set_ylim(0, 1.02)
-    for ax, t in ((a1, "Temporal-difference loss — the quantity DQN minimises"),
-                  (a2, "ε-greedy schedule — exploration annealing")):
+    for ax, t in ((a1, "Temporal-difference loss, the quantity DQN minimises"),
+                  (a2, "ε-greedy schedule, annealing exploration")):
         ax.set_xlabel("environment steps")
         ax.set_title(t, color=INK, loc="left", fontweight="bold", fontsize=10.5)
         _style(ax); _steps_axis(ax)
@@ -438,7 +438,7 @@ def fig_pg_entropy(progress, out: Path):
     ax.set_xlabel("environment steps")
     ax.set_ylabel("policy entropy (nats)")
     _steps_axis(ax)
-    ax.set_title("Policy-gradient entropy — exploration decaying into exploitation",
+    ax.set_title("Policy-gradient entropy: exploration decaying into exploitation",
                  color=INK, loc="left", fontweight="bold")
     ax.legend(frameon=True, facecolor=SURFACE, edgecolor=GRID, framealpha=1.0,
               loc="lower left")
@@ -471,14 +471,14 @@ def fig_convergence(curves, finals, out: Path):
                         textcoords="offset points", fontsize=9, color=INK,
                         bbox={"boxstyle": "round,pad=0.25", "facecolor": SURFACE,
                               "edgecolor": GRID})
-        ax.set_title(f"{LABELS[algo]}  —  {start:.1f} → {final:.1f}",
+        ax.set_title(f"{LABELS[algo]}:  {start:.1f} to {final:.1f}",
                      color=COLORS[algo], loc="left", fontweight="bold", fontsize=11)
         _style(ax)
     for ax in axes[1]:
         ax.set_xlabel("training episode")
     for ax in axes[:, 0]:
         ax.set_ylabel("episode reward (50-ep mean)")
-    fig.suptitle("Convergence — dotted line is 80% of each run's total improvement",
+    fig.suptitle("Convergence: the dotted line is 80% of each run's total improvement",
                  color=INK, x=0.02, ha="left", fontweight="bold", fontsize=12.5)
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     fig.savefig(out, dpi=150)
@@ -525,7 +525,7 @@ def write_best_summary(finals, gen, tdir: Path):
             "final_health": round(f["mean_final_health"], 3),
             # Held-out reward is reported in the SAME action mode as the headline
             # (stochastic). Mixing a deterministic held-out number into an otherwise
-            # stochastic table made PPO read as -4.18 -- as if it generalized badly --
+            # stochastic table made PPO read as -4.18, as if it generalized badly,
             # when its stochastic held-out score is +7.09, ABOVE its own
             # training-distribution score. The generalization gap column makes that
             # explicit: positive means it does better on unseen seeds.

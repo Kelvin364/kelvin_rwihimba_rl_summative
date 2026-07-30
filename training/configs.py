@@ -31,7 +31,7 @@ def _take(prod, n):
 
 
 def _dqn_configs() -> list[dict[str, Any]]:
-    # I vary learning rate, discount and REPLAY BUFFER SIZE -- the three levers I
+    # I vary learning rate, discount and REPLAY BUFFER SIZE, the three levers I
     # found matter most for a value-based learner's stability here. Buffer size took
     # the slot I first gave to exploration_fraction: when I swept that, it made no
     # measurable difference (0.1 -> -5.75 vs 0.2 -> -5.61 mean reward). My shaped
@@ -113,7 +113,7 @@ def _reinforce_configs() -> list[dict[str, Any]]:
     # variance-reduction question this algorithm exists to demonstrate), the
     # learning rate, and how many episodes are averaged into one gradient step.
     # `episodes_per_batch` trades gradient variance against update count and was
-    # decisive -- at 1 episode/update the policy sat at entropy 1.95 of a 2.20
+    # decisive: at 1 episode/update the policy sat at entropy 1.95 of a 2.20
     # maximum after 150k steps, i.e. still essentially uniform.
     combos = _take(itertools.product(
         [1e-3, 5e-4], ["value", "mean", "none"], [2, 4]), 10)

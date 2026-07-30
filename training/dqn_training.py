@@ -1,7 +1,7 @@
 """DQN (value-based) training entry point.
 
-The shared machinery — vectorised envs, checkpointing, resume, evaluation,
-`DONE.json` — lives in :mod:`training.sweep`, so DQN and the policy-gradient methods
+The shared machinery (vectorised envs, checkpointing, resume, evaluation and
+`DONE.json`) lives in :mod:`training.sweep`, so DQN and the policy-gradient methods
 are trained and scored by *identical* code and the comparison stays fair. This module
 holds only what is DQN-specific: its hyperparameter grid and its CLI.
 

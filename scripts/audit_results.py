@@ -186,11 +186,11 @@ def audit() -> int:
     # ----------------------------------------------------------------- verdict
     _hr()
     if issues:
-        print(f"RESULT: FAIL -- {len(issues)} issue(s):")
+        print(f"RESULT: FAIL, {len(issues)} issue(s):")
         for it in issues:
             print(f"  - {it}")
         return 1
-    print("RESULT: PASS -- all checks green.")
+    print("RESULT: PASS, all checks green.")
     return 0
 
 

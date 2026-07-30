@@ -2,7 +2,7 @@
 
 A scripted greedy *oracle* must clearly beat both a random policy and a do-nothing
 (WAIT) policy, and must actually succeed on most episodes. This test IS the
-definition of a winnable environment -- if it fails, the dynamics constants in
+definition of a winnable environment: if it fails, the dynamics constants in
 ``environment/agriscout_env.py`` need tuning.
 
     uv run pytest tests/test_oracle.py -s -q
@@ -23,8 +23,8 @@ from environment.agriscout_env import SUCCESS_BONUS, AgriScoutEnv  # noqa: E402
 EVAL_SEEDS = list(range(9000, 9020))
 
 # I require the dense (non-terminal) reward to separate a good policy from a bad one
-# by at least this much. My first reward function scored 2.16 here -- below the
-# per-episode noise floor (sigma ~ 2-5) -- and nothing I trained learned anything in
+# by at least this much. My first reward function scored 2.16 here, below the
+# per-episode noise floor (sigma 2 to 5), and nothing I trained learned anything in
 # ~8M env steps. This assertion exists so that cannot happen to me twice.
 MIN_DENSE_GAP = 10.0
 
@@ -159,7 +159,7 @@ def test_dense_reward_is_learnable():
 
     An agent cannot learn from a bonus it has never once received. If nearly all of
     the oracle's advantage sits in a terminal all-or-nothing bonus, the task is
-    unlearnable no matter how good the algorithm or the hyperparameters -- which is
+    unlearnable no matter how good the algorithm or the hyperparameters, which is
     exactly what my first reward did (dense gap 2.16, 0 successes in 44 runs).
     """
     b = benchmark()
@@ -177,12 +177,12 @@ def test_dense_reward_is_learnable():
     )
     assert gap_wait >= MIN_DENSE_GAP, (
         f"dense oracle-wait gap {gap_wait:.2f} < {MIN_DENSE_GAP}: doing nothing is "
-        f"nearly as good as working -- no gradient toward the task"
+        f"nearly as good as working, so there is no gradient toward the task"
     )
     # The bonus must be a tiebreaker on top of dense signal, not the whole signal.
     frac = SUCCESS_BONUS / (orc["mean_reward"] - rnd["mean_reward"])
     print(f"terminal bonus is {frac:.0%} of the oracle-vs-random gap (need < 50%)")
-    assert frac < 0.5, f"terminal bonus is {frac:.0%} of the total gap -- too sparse"
+    assert frac < 0.5, f"terminal bonus is {frac:.0%} of the total gap, which is too sparse"
 
 
 def test_shaping_beats_time_cost():
@@ -190,7 +190,7 @@ def test_shaping_beats_time_cost():
 
     In my first version I scaled the navigation shaping against the per-EPISODE time
     cost instead of the per-STEP one, so approaching work actually scored
-    -0.015/step -- the term was penalising the exact behaviour I had added it to
+    -0.015/step, so the term was penalising the exact behaviour I had added it to
     encourage. This test pins the sign down.
     """
     from environment.agriscout_env import (
@@ -203,7 +203,7 @@ def test_shaping_beats_time_cost():
     net = per_step - TIME_COST
     print(f"\napproach step: shaping={per_step:+.4f} time={-TIME_COST:+.4f} net={net:+.4f}")
     assert net > 0, (
-        f"approaching work nets {net:+.4f}/step -- the agent is punished for "
+        f"approaching work nets {net:+.4f}/step, so the agent is punished for "
         f"navigating toward the task"
     )
 

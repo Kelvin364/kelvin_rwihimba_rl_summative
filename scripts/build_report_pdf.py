@@ -114,7 +114,7 @@ def main() -> None:
     ap.add_argument("--md", default="REPORT.md")
     ap.add_argument("--out", default="assets/AgriScout_Report.pdf")
     ap.add_argument("--fig-height", type=int, default=56,
-                    help="max figure height in mm — the main page-count lever")
+                    help="max figure height in mm, the main page-count lever")
     args = ap.parse_args()
     build(_REPO_ROOT / args.md, _REPO_ROOT / args.out, args.fig_height)
 

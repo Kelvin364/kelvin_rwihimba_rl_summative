@@ -47,7 +47,7 @@ class REINFORCEAgent:
         self.baseline = str(hparams.get("baseline", "none"))
         # Monte-Carlo policy gradients are high-variance by construction. My first
         # version updated from a SINGLE episode, and after 150k steps the policy was
-        # still sitting at entropy 1.95 out of a 2.20 maximum -- essentially uniform,
+        # still sitting at entropy 1.95 out of a 2.20 maximum, essentially uniform and
         # learning nothing. Averaging the gradient over several episodes fixed that.
         self.episodes_per_batch = max(1, int(hparams.get("episodes_per_batch", 8)))
         # I rescale advantages to unit scale so my learning rate is decoupled from
@@ -57,7 +57,7 @@ class REINFORCEAgent:
         self.normalize_advantage = bool(hparams.get("normalize_advantage", True))
         # Clipping the gradient norm is what let me use a usable learning rate at
         # all. Unclipped, every lr >= 3e-3 drove entropy to 0 within a few updates and
-        # froze the policy on a single action -- one run collapsed to always-WAIT.
+        # froze the policy on a single action, and one run collapsed to always-WAIT.
         self.max_grad_norm = float(hparams.get("max_grad_norm", 0.5))
         # I give the critic its own learning rate and its own update count. When I
         # fitted it jointly with the policy, one step per batch, its loss stuck at
@@ -241,7 +241,7 @@ def train_reinforce(
             advantages = returns_t
 
         if agent.normalize_advantage:
-            # Scale only -- deliberately no re-centring, so "none"/"mean"/"value"
+            # Scale only, with deliberately no re-centring, so "none"/"mean"/"value"
             # remain genuinely different baselines rather than collapsing together.
             advantages = advantages / (advantages.std() + 1e-8)
 

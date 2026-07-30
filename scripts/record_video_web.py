@@ -1,4 +1,4 @@
-"""Record the WebGL demo view to an animated GIF -- headless, no ffmpeg.
+"""Record the WebGL demo view to an animated GIF, headless and with no ffmpeg.
 
 Captures the ACTUAL three.js scene the HTML viewer shows (lighting, shadows, the
 treatment rings), rather than re-rendering the episode somewhere else, so the clip
@@ -65,7 +65,7 @@ _HARNESS = """
     document.querySelector('#view3d').style.maxWidth = '__CW__px';
     ep = EP; snap3D = true; mountEpisode();
     Scene.setAuto(false);                    // steady camera for a clean recording
-    Scene.setPixelRatio(1);                  // see Scene.setPixelRatio -- DPR 2 is 4x the work
+    Scene.setPixelRatio(1);                  // see Scene.setPixelRatio: DPR 2 is 4x the work
     const cv = document.querySelector('#view3d canvas');
     const out = [];
     const E = episodes[EP];
@@ -150,7 +150,7 @@ def caption(img: Image.Image, f: dict, meta: dict, i: int, total: int) -> Image.
     d.text((x + 3 * r, y), label, font=big, fill=(255, 255, 255))
     d.text((x + 3 * r, y + int(bar * 0.40)), f["detail"], font=small, fill=(190, 189, 181))
 
-    title = f"AgriScout — {meta.get('model','?')} agent · seed {meta.get('seed','?')}"
+    title = f"AgriScout: {meta.get('model','?')} agent, seed {meta.get('seed','?')}"
     stat = (f"step {f['t']}/{total}   reward {f['r']:+.2f}   total {f['cum']:+.1f}   "
             f"health {np.mean(f['h']):.3f}")
     for text, dy, col in ((title, 0, (255, 255, 255)),
@@ -179,7 +179,7 @@ def main() -> None:
 
     html = Path(args.html)
     if not html.exists():
-        raise SystemExit(f"{html} not found -- build it with scripts/make_demo_html.py")
+        raise SystemExit(f"{html} not found, so build it with scripts/make_demo_html.py")
     if not Path(CHROME).exists():
         raise SystemExit(f"Chrome not found at {CHROME}")
 

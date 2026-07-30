@@ -9,7 +9,7 @@ action name.
     uv run python scripts/record_episode.py --all --seed 7
     uv run python scripts/make_demo_html.py --traces logs/traces/demo_*_seed7.json
 
-Writes ``assets/demo/index.html`` -- one file, no external requests.
+Writes ``assets/demo/index.html``, one file with no external requests.
 
 I chose the colours by measuring colour-blind separation rather than by eye, because
 my first two attempts both failed that check:
@@ -20,7 +20,7 @@ my first two attempts both failed that check:
     lightness and saturation rather than two opposed hues. I first tried an
     amber -> green ramp and dropped it: that is the classic red-green trap.
   * Since hue alone should never carry the meaning, health is encoded three ways at
-    once -- ramp colour, canopy SIZE, and a dashed outline on any cell below the
+    once: ramp colour, canopy SIZE, and a dashed outline on any cell below the
     success threshold. The last two still read in greyscale.
 """
 
@@ -200,7 +200,7 @@ def render_html(episodes: list[dict]) -> str:
     # <script>, which is why that build is the one vendored.)
     three = _VENDOR_THREE.read_text() if _VENDOR_THREE.exists() else ""
     if not three:
-        print(f"WARNING: {_VENDOR_THREE} missing -- 3D view will be unavailable.")
+        print(f"WARNING: {_VENDOR_THREE} missing, so the 3D view will be unavailable.")
     return (
         _TEMPLATE
         .replace("/*__DATA__*/null", data)
@@ -214,7 +214,7 @@ _TEMPLATE = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AgriScout — episode viewer</title>
+<title>AgriScout episode viewer</title>
 <style>
 :root{
   color-scheme: light;
@@ -247,7 +247,7 @@ _TEMPLATE = r"""<!doctype html>
 }
 *{box-sizing:border-box}
 /* The UA `[hidden]` rule is display:none, which an explicit display:grid on .field
-   silently outranks -- both views rendered at once until this was added. */
+   silently outranks, and both views rendered at once until I added this. */
 [hidden]{display:none!important}
 body{margin:0;background:var(--surface-0);color:var(--ink);
   font:15px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
@@ -386,7 +386,7 @@ summary{cursor:pointer;color:var(--ink-2);font-size:13px}
 <body>
 <div class="wrap">
   <header>
-    <h1>AgriScout — episode viewer</h1>
+    <h1>AgriScout episode viewer</h1>
     <span class="sub" id="epMeta"></span>
     <span style="flex:1"></span>
     <select id="epPick" aria-label="Choose episode"></select>
@@ -397,7 +397,7 @@ summary{cursor:pointer;color:var(--ink-2);font-size:13px}
   <div class="grid2">
     <section class="card">
       <div class="cardhead">
-        <h2 style="margin:0">Field — <span id="fieldDims"></span></h2>
+        <h2 style="margin:0">Field: <span id="fieldDims"></span></h2>
         <div class="tabs" role="tablist">
           <button id="tab3d" class="on" role="tab" aria-selected="true">3D</button>
           <button id="tabGrid" role="tab" aria-selected="false">Grid</button>
@@ -415,7 +415,7 @@ summary{cursor:pointer;color:var(--ink-2);font-size:13px}
       </div>
       <div class="track-strip" id="strip" role="img"
            aria-label="Action taken at each step of the episode"></div>
-      <div class="striplab"><span>every step of the episode — click to jump</span>
+      <div class="striplab"><span>every step of the episode, click to jump</span>
         <span id="stripCounts"></span></div>
       <div class="legend">
         <i><span class="ramp"></span> crop health: bare soil → thriving</i>
@@ -501,7 +501,7 @@ let snap3D = true;
 /* ---------- episode picker ---------- */
 episodes.forEach((e,i)=>{
   const o=document.createElement('option');
-  o.value=i; o.textContent=`${e.meta.model} — seed ${e.meta.seed}`;
+  o.value=i; o.textContent=`${e.meta.model}, seed ${e.meta.seed}`;
   $('#epPick').appendChild(o);
 });
 $('#epPick').onchange = e => { ep=+e.target.value; idx=0; mountEpisode(); };
@@ -530,7 +530,7 @@ function mountEpisode(){
       const d=document.createElement('div'); d.className='cell';
       d.innerHTML=`<div class="canopy"></div>`;
       if(r===0&&c===0){ const p=document.createElement('div'); p.className='depotpad';
-        p.title='Depot — RETURN_TO_DEPOT refills here'; d.appendChild(p); }
+        p.title='Depot: RETURN_TO_DEPOT refills here'; d.appendChild(p); }
       field.appendChild(d); cells[r][c]=d;
     }
   }
@@ -623,7 +623,7 @@ function render(){
   const ARROW={MOVE_N:'↑',MOVE_S:'↓',MOVE_E:'→',MOVE_W:'←',
                IRRIGATE:'💧',SPRAY:'✳',RETURN_TO_DEPOT:'⌂',SCAN:'◎',WAIT:'•'};
   rov.innerHTML=`<span>${ARROW[f.a]||'•'}</span>`;
-  rov.title=`Rover at (${rr},${rc}) — ${f.reason}`;
+  rov.title=`Rover at (${rr},${rc}): ${f.reason}`;
   cells[rr][rc].appendChild(rov);
   if(f.kind==='irrigate'||f.kind==='spray'||f.kind==='depot'){
     const pg=document.createElement('div'); pg.className='ping';

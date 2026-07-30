@@ -203,7 +203,7 @@ def run_finals() -> None:
 # Publish: copy the finals into models/ so the demo loads the trained agents
 # ---------------------------------------------------------------------------
 # main.py loads these fixed paths. I was copying the finals across by hand, which let
-# models/ drift out of step with logs/finals/ -- after I changed the observation space
+# models/ drift out of step with logs/finals/. After I changed the observation space
 # it was still holding weights that no longer loaded. So publishing is a pipeline step.
 _MODEL_TARGETS = {
     "dqn": ("dqn/dqn.zip", "model.zip"),

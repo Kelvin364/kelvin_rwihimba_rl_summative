@@ -1,4 +1,4 @@
-"""AgriScout — entry point / demo CLI.
+"""AgriScout: entry point and demo CLI.
 
     uv run main.py                     # play ONE episode of the PPO agent with the
                                        # PyBullet GUI (falls back to headless DIRECT),
@@ -44,7 +44,7 @@ class Args:
     """play a rendered episode, or evaluate all four trained agents."""
     agent: Literal["ppo", "dqn", "a2c", "reinforce", "oracle", "random"] = "ppo"
     """which agent to play (play mode only). 'oracle' and 'random' are the scripted
-    reference policies -- useful for showing what a perfect / a careless run looks
+    reference policies, useful for showing what a perfect or a careless run looks
     like next to a trained one."""
     episodes: int = 1
     """number of episodes to play."""
@@ -56,6 +56,16 @@ class Args:
     """wall-clock seconds per environment step in the GUI (bigger = slower).
     At the 0.12 default a 150-step episode plays in ~18s; use ~0.5 to slow it to
     roughly 75s so it can be narrated."""
+    view: Literal["pybullet", "web"] = "pybullet"
+    """which renderer to use.
+
+    'pybullet' opens a live 3D window that steps alongside the terminal output, so
+    you can watch the agent and read its per-step numbers at the same time.
+
+    'web' instead records the episode, builds my browser viewer and opens it. That
+    one is the better-looking renderer (real lighting, shadows, treatment effects)
+    and it can be scrubbed and replayed, but it is built after the episode has run
+    rather than live."""
 
 
 class _ScriptedPredictor:
@@ -139,7 +149,7 @@ def play(args: Args) -> None:
     mode_str = "GUI" if renderer.gui else "DIRECT (headless)"
     style = "deterministic" if args.deterministic else "stochastic"
     print(f"Playing {args.episodes} episode(s) with agent '{args.agent}' "
-          f"[{style} actions] — PyBullet {mode_str}\n")
+          f"[{style} actions], PyBullet {mode_str}\n")
 
     try:
         for ep in range(args.episodes):
@@ -206,10 +216,43 @@ def evaluate_all() -> None:
     print("\n(random and oracle are the 0% / 100% reference points for these seeds)")
 
 
+def play_web(args: Args) -> None:
+    """Record the episode(s), build the browser viewer and open it.
+
+    No pybullet involved. This is the renderer I use for the write-up: it has real
+    lighting and shadows, shows a treatment effect at the treated cell, and can be
+    scrubbed back and forth, at the cost of being built after the run rather than
+    streamed live.
+    """
+    import subprocess
+    import sys
+
+    from scripts.make_demo_html import build_episode, render_html
+    from scripts.record_episode import record
+
+    traces = [record(args.agent, args.seed + ep) for ep in range(args.episodes)]
+    # Write to its own file rather than index.html: that one is the curated
+    # multi-agent viewer the README links to, and a single-agent run should not
+    # quietly replace it.
+    out = REPO / "assets" / "demo" / "last_run.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(render_html([build_episode(t) for t in traces]))
+    print(f"\n  -> viewer: {out}")
+
+    opener = {"darwin": "open", "win32": "start"}.get(sys.platform, "xdg-open")
+    try:
+        subprocess.run([opener, str(out)], check=False)
+        print("  -> opened in your browser (press Play, drag to orbit)")
+    except FileNotFoundError:
+        print(f"  -> open it manually: {out}")
+
+
 def main() -> None:
     args = tyro.cli(Args)
     if args.mode == "evaluate":
         evaluate_all()
+    elif args.view == "web":
+        play_web(args)
     else:
         play(args)
 

@@ -1,4 +1,4 @@
-"""Episode trace recording -- serialise an episode to JSON.
+"""Episode trace recording: serialise an episode to JSON.
 
 Deliberately dependency-light: numpy only. Trace recording has nothing to do with
 3D rendering, but it used to live in ``environment.rendering``, which imports
@@ -49,7 +49,7 @@ class EpisodeRecorder:
         }
 
     NB: a frame records the state AFTER its step, and there is no frame for the
-    reset state -- so the "before" picture for frame ``i`` is frame ``i - 1``.
+    reset state, so the "before" picture for frame ``i`` is frame ``i - 1``.
     """
 
     run_id: str

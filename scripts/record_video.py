@@ -1,4 +1,4 @@
-"""Render a recorded episode to an animated GIF -- headless, no GUI, no ffmpeg.
+"""Render a recorded episode to an animated GIF, headless, with no GUI and no ffmpeg.
 
 Replays a trace's ACTION SEQUENCE through a freshly seeded environment. Because the
 env is seeded and its dynamics are deterministic given the actions, the replay
@@ -77,7 +77,7 @@ def _caption(img: Image.Image, frame: dict, note: dict, meta: dict, i: int, n: i
     tw = d.textlength(right, font=small)
     d.text((w - tw - int(w * 0.028), y + int(bar_h * 0.36)), right, font=small,
            fill=(196, 195, 186))
-    title = f"AgriScout — {meta.get('model', '?')} agent, seed {meta.get('seed', '?')}"
+    title = f"AgriScout: {meta.get('model', '?')} agent, seed {meta.get('seed', '?')}"
     tw2 = d.textlength(title, font=small)
     d.text((w - tw2 - int(w * 0.028), y), title, font=small, fill=(255, 255, 255))
 
@@ -126,7 +126,7 @@ def record(trace_path: Path, out: Path, width: int, fps: int, tween: int) -> Pat
     renderer.close()
 
     out.parent.mkdir(parents=True, exist_ok=True)
-    # Quantize to a shared adaptive palette -- keeps the GIF small without the
+    # Quantize to a shared adaptive palette, which keeps the GIF small without the
     # frame-to-frame colour churn that per-frame palettes cause.
     pal = images[0].quantize(colors=192, method=Image.MEDIANCUT)
     quant = [im.quantize(palette=pal, dither=Image.FLOYDSTEINBERG) for im in images]

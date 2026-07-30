@@ -14,7 +14,7 @@ and my smoke test passes in a lightweight mock instead.
 Coordinate layout
 ------------------
 * Grid cell ``(row, col)`` maps to world ``(x = (col + 1) * CELL, y = (row + 1) * CELL)``.
-* The depot pad is drawn on grid cell ``(0, 0)`` -- the same square where
+* The depot pad is drawn on grid cell ``(0, 0)``, the same square where
   RETURN_TO_DEPOT actually refills.
 * Crop stalks have a fixed full height and sit sunk into a thick ground slab, so the
   *visible* height above ``z = 0`` tracks health. That lets me animate growth by
@@ -41,7 +41,7 @@ CELL = 1.0                 # metres between crop-cell centres
 CROP_MAX_H = 0.9           # full height of a crop stalk (health == 1.0)
 CROP_MIN_VIS = 0.06        # minimum visible sliver so dead cells are still placed
 CROP_HALF_XY = 0.32        # canopy half-width in x/y
-STALK_HALF_XY = 0.07       # stalk half-width -- thin, so the canopy reads as foliage
+STALK_HALF_XY = 0.07       # stalk half-width, thin so the canopy reads as foliage
 CANOPY_H = 0.22            # canopy slab thickness
 GROUND_THICK = 2.0         # thick slab so "buried" crop portions stay hidden
 PEST_MAX_R = 0.55          # pest disc radius at severity == 1.0
@@ -237,7 +237,7 @@ class AgriScoutRenderer:
                 )
 
     def _build_pests(self) -> None:
-        """One permanent disc per cell -- see :meth:`_update_pests`."""
+        """One permanent disc per cell; see :meth:`_update_pests`."""
         for r in range(self.n_rows):
             for c in range(self.n_cols):
                 vis = p.createVisualShape(
@@ -338,7 +338,7 @@ class AgriScoutRenderer:
         self._render_col = self._prev_col + (col - self._prev_col) * alpha
         self._render_heading = self._prev_heading + delta * alpha
 
-        if alpha >= 1.0:  # commit -- the next step interpolates from here
+        if alpha >= 1.0:  # commit, so the next step interpolates from here
             self._prev_row, self._prev_col = row, col
             self._prev_heading = self._prev_heading + delta
 
@@ -393,7 +393,7 @@ class AgriScoutRenderer:
         I first destroyed and re-created these on every frame so the radius could track
         severity, since pybullet cannot resize a primitive in place. That churned up to
         n_rows*n_cols bodies per frame and visibly flickered. Now each cell owns one
-        permanent disc and I encode severity in colour and opacity instead -- pale
+        permanent disc and I encode severity in colour and opacity instead: pale
         amber for a light infestation, deep red for a severe one. It is flicker-free
         and readable at a glance. Cells below the threshold I park under the slab.
         """

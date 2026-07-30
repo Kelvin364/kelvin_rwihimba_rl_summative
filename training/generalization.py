@@ -47,8 +47,8 @@ def run_generalization() -> Path:
     out_path = out_dir / "results.csv"
 
     # Both action-selection modes are reported. Scoring generalization on the
-    # deterministic policy alone understates every agent here -- their greedy argmax
-    # is much worse than sampling (PPO: -10.6 vs +5.5 on the same weights) -- so a
+    # deterministic policy alone understates every agent here, because their greedy
+    # argmax is much worse than sampling (PPO: -10.6 vs +5.5 on the same weights), so a
     # deterministic-only table would describe a different policy than the one the
     # demo actually runs.
     fields = [
