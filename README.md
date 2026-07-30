@@ -1,18 +1,18 @@
-# AgriScout — reinforcement learning for autonomous crop scouting
+# AgriScout: reinforcement learning for autonomous crop scouting
 
 A custom Gymnasium environment in which a rover drives a field of crop cells,
 irrigating stressed plants and spraying pest hotspots while managing battery, water
-and pesticide. Four algorithms — **DQN, PPO, A2C and a from-scratch REINFORCE** — are
-tuned, trained and compared under an identical environment-step budget.
+and pesticide. I tune, train and compare four algorithms (**DQN, PPO, A2C and a
+from-scratch REINFORCE**) under an identical environment-step budget.
 
-📄 **[REPORT.md](REPORT.md)** — the full write-up: environment design, tuning analysis
+📄 **[REPORT.md](REPORT.md)** is the full write-up, covering environment design, tuning analysis
 per algorithm, the value-based vs policy-gradient comparison, generalization, and
 limitations.
 
 ![the episode viewer](assets/figures/demo_viewer.png)
 
 *My episode viewer, showing the trained PPO agent mid-episode. The 3D field is on the
-left — taller, greener crops are healthier, red markers are pest hotspots, and the
+left, where taller and greener crops are healthier, red markers are pest hotspots, and the
 rover carries a locator ring. The panel on the right says what the agent is doing and
 why at that exact step, and the strip under the field is every action of the episode
 colour-coded by type. This run finished at +15.78 with 18 treatments and none wasted.*
@@ -32,7 +32,7 @@ uv run pytest -q                               # environment + learnability gate
 
 **The HTML episode viewer is the demo to open first.** It renders the episode in
 WebGL (three.js) with a **3D** and a **Grid** view of the same recorded trace, and
-shows *what the agent is doing and why* at every step — no narration required:
+shows *what the agent is doing and why* at every step, so it needs no narration:
 
 ```bash
 uv run python scripts/record_episode.py --agent ppo --seed 9003
@@ -43,7 +43,7 @@ open assets/demo/index.html
 
 Drag to orbit, scroll to zoom, space to play, arrow keys to step. Crop height and
 colour track health, pest severity grows as red markers, and the rover's beacon and a
-ground ring fire in the treatment's colour at the treated cell — so a treatment is
+ground ring fire in the treatment's colour at the treated cell, so a treatment is
 visible as an event, in place, without reading anything.
 
 ### Serving the agents as an API
@@ -70,13 +70,13 @@ open http://127.0.0.1:8000/            # the bundled viewer, served by the API
 
 | | |
 |---|---|
-| **Observation** | `Box(0, 1, (176,))` — health grid, pest grid, irrigation timers, rover row/col, battery, water, pesticide, step fraction, plus 8 egocentric target features |
-| **Action** | `Discrete(9)` — `MOVE_{N,S,E,W}`, `SCAN`, `IRRIGATE`, `SPRAY`, `RETURN_TO_DEPOT`, `WAIT` |
+| **Observation** | `Box(0, 1, (176,))`: health grid, pest grid, irrigation timers, rover row/col, battery, water, pesticide, step fraction, plus 8 egocentric target features |
+| **Action** | `Discrete(9)`: `MOVE_{N,S,E,W}`, `SCAN`, `IRRIGATE`, `SPRAY`, `RETURN_TO_DEPOT`, `WAIT` |
 | **Episode** | 6 × 9 field, 150 steps |
 | **Success** | mean health ≥ 0.60 **and** mean pest ≤ 0.15 at the final step |
 
-Reward is action-attributed — the agent is paid for health it adds and pest it
-removes, minus waste penalties and a small time cost — plus **potential-based shaping**
+Reward is action-attributed, so the agent is paid for health it adds and pest it
+removes, minus waste penalties and a small time cost, plus **potential-based shaping**
 (Ng, Harada & Russell 1999) on the success condition itself:
 
 ```
@@ -92,7 +92,7 @@ causes, and any cycle in Φ sums to exactly zero, so it cannot be farmed.
 
 ## Results
 
-Reference policies on eval seeds 9000–9019: **random −13.88**, **oracle +14.55**.
+Reference policies on eval seeds 9000-9019: **random −13.88**, **oracle +14.55**.
 `% of oracle` places each agent on that scale (0% = random, 100% = oracle) and is the
 only figure comparable across reward-function versions.
 
@@ -103,8 +103,8 @@ only figure comparable across reward-function versions.
 | **A2C** | −4.65 | 1.20 | 0.45 | 0.722 | −0.01 | **53.1%** |
 | **REINFORCE** | −21.65 | −8.42 | 0.00 | 0.489 | −7.06 | **19.2%** |
 
-PPO and DQN finish level. I treat the 0.1-point difference as a tie, not a ranking —
-it is far inside the variation I would expect from a different random seed.
+PPO and DQN finish level. I treat the 0.1-point difference as a tie rather than a
+ranking, because it is far inside the variation I would expect from a different seed.
 
 ![final performance](assets/figures/fig2_final_comparison.png)
 
@@ -129,7 +129,7 @@ Three findings worth noting:
    −10.6 deterministic and +5.5 stochastic on identical weights. Reporting only the
    deterministic policy would describe a policy nobody actually runs, so I carry both
    modes through tuning, finals, generalization and the report. My final DQN agent is
-   the exception (8.57 vs 8.66) — it learns action *values*, so its argmax is over
+   the exception (8.57 vs 8.66), because it learns action *values*, so its argmax is over
    calibrated estimates and is meaningful, which is exactly what I would expect.
 2. **No overfitting.** Every agent scores *higher* on the 50 never-seen held-out
    seeds than on training-distribution seeds (`gen_gap` is positive for all four).
@@ -143,7 +143,7 @@ Three findings worth noting:
 
 The first version of this environment **passed its scripted-oracle winnability gate
 and was still impossible to learn**. Across 40 sweep
-configurations and four 400k-step finals — roughly 8M environment steps — not one run
+configurations and four 400k-step finals, roughly 8M environment steps, not one run
 recorded a single success, and three of four algorithms finished *worse than random*.
 
 Decomposing the oracle's return explained why:
@@ -153,8 +153,8 @@ Decomposing the oracle's return explained why:
 | oracle | +17.03 | **−2.97** | +20.00 |
 | random | −5.13 | **−5.13** | 0 |
 
-The entire *learnable* gap was **2.16 reward over 150 steps — 0.014/step** — against
-per-episode noise of σ ≈ 2–5. Ninety percent of the oracle's advantage sat in one
+The entire *learnable* gap was **2.16 reward over 150 steps, or 0.014/step**, against
+per-episode noise of sigma between 2 and 5. Ninety percent of the oracle's advantage sat in one
 all-or-nothing terminal bonus that no agent ever received, and therefore could never
 learn from. Compounding it, the navigation shaping had been scaled against the
 per-*episode* time cost rather than the per-*step* one, so approaching work scored
@@ -185,17 +185,17 @@ uv run python scripts/learnability_gate.py --all
 
 ```
 main.py               demo / evaluation CLI
-api.py                FastAPI service — agents over HTTP as JSON
+api.py                FastAPI service exposing the agents over HTTP as JSON
 environment/
   custom_env.py       canonical env import path
-  agriscout_env.py    Gymnasium env — numpy + gymnasium only, never imports pybullet
+  agriscout_env.py    Gymnasium env, numpy + gymnasium only, never imports pybullet
   rendering.py        PyBullet 3D renderer (imported only when rendering)
   trace.py            episode → JSON recorder (headless, numpy only)
 training/
   configs.py          40 sweep configurations (10 per algorithm)
   dqn_training.py     DQN entry point   (--sweep / --final / --run)
   pg_training.py      REINFORCE + PPO + A2C entry point
-  sweep.py            THE shared entry point — train, evaluate, checkpoint, resume
+  sweep.py            THE shared entry point: train, evaluate, checkpoint, resume
   reinforce.py        from-scratch REINFORCE (3 baselines, batching, fitted critic)
   generalization.py   held-out vs training-distribution evaluation
   run_all.py          orchestrator: sweeps → finals → generalization → publish
@@ -206,7 +206,7 @@ scripts/
   demo_scene.js         WebGL field scene (three.js), inlined into the viewer
   audit_results.py      verify results completeness
 assets/demo/
-  index.html            the generated viewer — one file, works offline
+  index.html            the generated viewer, one file, works offline
   vendor/three.min.js   three.js r160 (MIT, license alongside)
 analysis.py           figures + tables
 ```
@@ -248,5 +248,5 @@ The full pipeline takes roughly 30 minutes on 8 physical cores.
   blue/orange/violet, but violet and blue are nearly indistinguishable to a protan
   viewer on a dark background, so violet became aqua. My first health ramp was
   amber→green, which is the classic red-green trap, so I replaced it with a single
-  soil→green ramp. Health is encoded three ways at once — ramp colour, canopy size,
-  and a dashed outline below the threshold — so nothing depends on hue alone.
+  soil-to-green ramp. Health is encoded three ways at once (ramp colour, canopy size,
+  and a dashed outline below the threshold), so nothing depends on hue alone.
