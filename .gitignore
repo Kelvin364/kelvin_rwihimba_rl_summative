@@ -1,1 +1,15 @@
 .claude/
+
+# Training outputs / results are large and reproducible -> keep out of git.
+logs/
+
+# Model binaries are not committed by default...
+*.zip
+*.pt
+*.pth
+
+# ...EXCEPT the four final agents the marker needs from a fresh clone.
+!models/dqn/dqn.zip
+!models/pg/ppo.zip
+!models/pg/a2c.zip
+!models/pg/reinforce.pt

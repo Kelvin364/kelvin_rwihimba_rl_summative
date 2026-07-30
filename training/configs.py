@@ -10,7 +10,7 @@ from __future__ import annotations
 import itertools
 from typing import Any
 
-SWEEP_STEPS = 100_000
+SWEEP_STEPS = 100_000  # sweeps only need to RANK configs, not fully converge
 N_ENVS = 4  # for PPO / A2C (SubprocVecEnv)
 
 
@@ -43,7 +43,9 @@ def _dqn_configs() -> list[dict[str, Any]]:
 
 
 def _ppo_configs() -> list[dict[str, Any]]:
-    combos = _take(itertools.product([3e-4, 1e-3], [256, 512], [0.0, 0.01, 0.001]), 10)
+    # entropy grid spans {0.0, 0.01, 0.05}: ent=0.0 demonstrably collapses to a
+    # single action (a report finding); 0.01/0.05 provide the exploration fix.
+    combos = _take(itertools.product([3e-4, 1e-3], [256, 512], [0.01, 0.05, 0.0]), 10)
     out = []
     for i, (lr, n_steps, ent) in enumerate(combos):
         out.append({
@@ -66,9 +68,10 @@ def _ppo_configs() -> list[dict[str, Any]]:
 
 
 def _a2c_configs() -> list[dict[str, Any]]:
-    combos = _take(itertools.product([7e-4, 3e-4], [5, 16], [0.0, 0.01], [0.9, 1.0]), 10)
+    # entropy grid spans {0.0, 0.01, 0.05} (see PPO note); ent=0.01 is the baseline.
+    combos = _take(itertools.product([7e-4, 3e-4], [5, 16], [0.01, 0.05, 0.0]), 10)
     out = []
-    for i, (lr, n_steps, ent, gae) in enumerate(combos):
+    for i, (lr, n_steps, ent) in enumerate(combos):
         out.append({
             "algo": "a2c",
             "run_id": f"a2c_{i:02d}",
@@ -77,7 +80,7 @@ def _a2c_configs() -> list[dict[str, Any]]:
                 "learning_rate": lr,
                 "n_steps": n_steps,
                 "gamma": 0.99,
-                "gae_lambda": gae,
+                "gae_lambda": 1.0,
                 "ent_coef": ent,
                 "n_envs": N_ENVS,
                 "seed": i,
@@ -113,7 +116,7 @@ def get_sweep_configs() -> list[dict[str, Any]]:
 
 
 ALGOS = ["dqn", "ppo", "a2c", "reinforce"]
-FINAL_STEPS = 500_000
+FINAL_STEPS = 400_000  # finals produce the report curves and the demo agent
 
 
 def core_cost(algo: str) -> int:

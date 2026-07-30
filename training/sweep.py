@@ -166,8 +166,11 @@ def _load_sb3_for_eval(algo: str, folder: Path):
 # =============================================================================
 # Evaluation (shared by all algorithms)
 # =============================================================================
-def evaluate(predictor, seeds=EVAL_SEEDS) -> dict[str, float]:
-    """Roll out a greedy policy on held-out seeds; return aggregate metrics."""
+def evaluate(predictor, seeds=EVAL_SEEDS, deterministic: bool = True) -> dict[str, float]:
+    """Roll out a policy on held-out seeds; return aggregate metrics.
+
+    ``deterministic`` selects greedy (argmax) vs sample-mode action selection.
+    """
     from environment.agriscout_env import make_env
 
     env = make_env()
@@ -177,7 +180,7 @@ def evaluate(predictor, seeds=EVAL_SEEDS) -> dict[str, float]:
         done = False
         ep_r = 0.0
         while not done:
-            action, _ = predictor.predict(obs, deterministic=True)
+            action, _ = predictor.predict(obs, deterministic=deterministic)
             action = int(np.asarray(action).reshape(-1)[0])
             obs, r, term, trunc, _ = env.step(action)
             ep_r += r
@@ -193,6 +196,15 @@ def evaluate(predictor, seeds=EVAL_SEEDS) -> dict[str, float]:
         "mean_final_health": float(np.mean(healths)),
         "water_used": float(np.mean(waters)),
     }
+
+
+def evaluate_both(predictor, seeds=EVAL_SEEDS) -> dict[str, float]:
+    """Deterministic (headline) + stochastic (sample-mode) eval metrics."""
+    det = evaluate(predictor, seeds, deterministic=True)
+    stoch = evaluate(predictor, seeds, deterministic=False)
+    out = dict(det)
+    out.update({f"{k}_stochastic": v for k, v in stoch.items()})
+    return out
 
 
 def _episodes_to_converge(folder: Path) -> int:
@@ -320,7 +332,7 @@ def run_experiment(
     else:
         raise ValueError(f"Unknown algo: {algo!r}")
 
-    metrics = evaluate(predictor, EVAL_SEEDS)
+    metrics = evaluate_both(predictor, EVAL_SEEDS)
     etc = _episodes_to_converge(folder)
 
     payload = {

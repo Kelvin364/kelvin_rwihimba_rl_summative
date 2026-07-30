@@ -28,8 +28,68 @@ ACTION_NAMES = [
 
 # Success thresholds (episode counts as a success if the field ends healthy and
 # pests are controlled).
-SUCCESS_HEALTH = 0.70
-SUCCESS_PEST = 0.30
+SUCCESS_HEALTH = 0.60
+SUCCESS_PEST = 0.15
+
+# Pest dynamics (localized; moderate so success stays discriminative -- tuned so
+# the oracle gate passes with oracle-random >= 15 AND random success <= 0.30).
+N_HOTSPOTS = (3, 5)          # rng.integers(low, high) -> 3..4 hotspots
+HOTSPOT_SEVERITY = (0.3, 0.6)
+INFEST_THRESHOLD = 0.1       # a cell is "infested" above this
+HOTSPOT_GROWTH = 0.025       # per-step growth of infested cells
+SPREAD_COEF = 0.028          # P(spread) = SPREAD_COEF * min(severity, SPREAD_SEV_CAP)
+SPREAD_SEV_CAP = 0.5         # spread probability saturates -> growth is bounded,
+#                              never exponential (a missed hotspot costs linearly)
+SPREAD_SEED = 0.20           # severity a freshly-infected neighbour receives
+#                              (> INFEST_THRESHOLD so infections escalate)
+
+# Health dynamics (as in the oracle-passing version: a cleaned, irrigated field
+# can reach SUCCESS_HEALTH).
+BASE_DECAY = 0.0005          # passive per-step health loss on a clean cell
+PEST_DECAY_COEF = 0.02       # extra decay proportional to local pest severity
+IRRIGATED_DECAY_FACTOR = 0.3  # irrigated cells decay slower
+RECOVER_RATE = 0.012         # per-step recovery for irrigated, low-pest cells
+BASE_RECOVER = 0.004         # passive recovery for ANY low-pest cell (gated on
+#                              LOCAL pest, not field mean): collapse is never
+#                              absorbing -- a cleaned cell always heals back.
+LOW_PEST_RECOVER = 0.2       # a cell recovers when its local pest is below this
+IRRIGATE_BOOST = 0.2         # instant health added by an IRRIGATE action
+
+# --- ACTION-ATTRIBUTED REWARD ------------------------------------------------
+# The per-step reward is 100% attributable to the agent's OWN actions: natural
+# pest spread/growth and passive health decay do NOT enter the reward (they only
+# change the world state / success). This removes the uncontrollable per-step
+# noise that previously collapsed PPO to a single action.
+#
+#   r = REWARD_IRRIGATE_COEF * (health added at the treated cell by THIS irrigate)
+#     + REWARD_SPRAY_COEF    * (pest severity removed by THIS spray, incl. halving)
+#     - TIME_COST
+#     - FIELD_PRESSURE_COEF * mean_pest   (tiny smooth term: "farming" pest is
+#                                          never profitable)
+#     - waste penalties (clean-spray / overwater / empty-tank / wall-bump / depot)
+#   Terminal: + SUCCESS_BONUS on success, - DEATH_PENALTY on battery death.
+REWARD_IRRIGATE_COEF = 1.0
+REWARD_SPRAY_COEF = 0.6
+TIME_COST = 0.05
+FIELD_PRESSURE_COEF = 0.05
+SUCCESS_BONUS = 20.0
+DEATH_PENALTY = 2.0
+# Waste penalties.
+CLEAN_SPRAY_PENALTY = 0.05   # spraying a cell that is already clean
+OVERWATER_PENALTY = 0.05     # irrigating an already-healthy cell
+EMPTY_TANK_PENALTY = 0.10    # spray/irrigate with an empty tank
+WALL_BUMP_PENALTY = 0.05     # moving into a boundary
+DEPOT_PENALTY = 0.02         # RETURN_TO_DEPOT while not at the depot
+
+# --- Potential-based reward shaping (Ng, Harada & Russell, 1999) --------------
+# F(s, a, s') = gamma * Phi(s') - Phi(s) is *policy-invariant*: it provably does
+# NOT change the set of optimal policies, so the oracle gate and reward semantics
+# remain valid. Phi rewards being close to the highest-priority work (nearest
+# active pest hotspot, else the lowest-health cell), giving a per-step gradient
+# TOWARD work that solves the navigation credit-assignment problem.
+NAV_SHAPING_COEF = 0.5       # ~+0.5 total per full approach (>> 0.05 time cost)
+NAV_SHAPING_GAMMA = 0.99
+NAV_PEST_THRESHOLD = 0.15    # cells above this are "work to do"
 
 
 class AgriScoutEnv(gym.Env):
@@ -41,11 +101,15 @@ class AgriScoutEnv(gym.Env):
 
     Actions (Discrete 9): see :data:`ACTION_NAMES`.
 
-    Reward (per step): net field improvement minus time/waste costs::
+    Reward (per step): ACTION-ATTRIBUTED -- 100% determined by the agent's own
+    actions; natural pest spread/growth and passive health decay do NOT enter the
+    reward, only the world state::
 
-        r = 10*(mean_health_after - mean_health_before)
-            + 5*(mean_pest_before - mean_pest_after)
-            - 0.05 (time) - waste/bump penalties
+        r = 1.0 * (health added at the treated cell by THIS irrigate)
+            + 0.6 * (pest severity removed by THIS spray, incl. neighbour halving)
+            - 0.05 (time) - 0.05 * mean_pest (field pressure) - waste penalties
+            + 0.5 * (0.99 * Phi(s') - Phi(s))   policy-invariant nav shaping
+            + 20.0 terminal bonus if the episode ends in success
             - 2.0 terminal penalty if the battery dies.
     """
 
@@ -53,7 +117,7 @@ class AgriScoutEnv(gym.Env):
     ENV_VERSION = ENV_VERSION
     ACTION_NAMES = ACTION_NAMES
 
-    def __init__(self, n_rows: int = 8, n_cols: int = 12, max_steps: int = 200) -> None:
+    def __init__(self, n_rows: int = 6, n_cols: int = 9, max_steps: int = 150) -> None:
         super().__init__()
         self.n_rows = n_rows
         self.n_cols = n_cols
@@ -74,7 +138,12 @@ class AgriScoutEnv(gym.Env):
         super().reset(seed=seed)
         rng = self.np_random
         self.health_grid = rng.uniform(0.5, 1.0, (self.n_rows, self.n_cols)).astype(np.float32)
-        self.pest_grid = rng.uniform(0.0, 0.25, (self.n_rows, self.n_cols)).astype(np.float32)
+        # Localized pests: a few infested hotspots, rest clean (treatable).
+        self.pest_grid = np.zeros((self.n_rows, self.n_cols), dtype=np.float32)
+        n_hot = int(rng.integers(*N_HOTSPOTS))
+        flat_idx = rng.choice(self.n_rows * self.n_cols, size=n_hot, replace=False)
+        sev = rng.uniform(*HOTSPOT_SEVERITY, size=n_hot).astype(np.float32)
+        self.pest_grid.flat[flat_idx] = sev
         self.irrigation_grid = np.zeros((self.n_rows, self.n_cols), dtype=np.int32)
 
         self.rover_row = 0.0
@@ -96,27 +165,28 @@ class AgriScoutEnv(gym.Env):
         self.last_action = action
         name = ACTION_NAMES[action]
 
-        mean_h_before = float(self.health_grid.mean())
-        mean_p_before = float(self.pest_grid.mean())
-
-        penalty = self._apply_action(name)
+        # Reward comes ONLY from the agent's action (attribution) + time/pressure;
+        # the world dynamics below change state but never the reward directly.
+        phi_before = self._potential()
+        action_reward = self._apply_action(name)
         self._advance_world(name)
-
-        mean_h_after = float(self.health_grid.mean())
-        mean_p_after = float(self.pest_grid.mean())
+        # Policy-invariant potential-based shaping (Ng et al. 1999).
+        shaping = NAV_SHAPING_COEF * (NAV_SHAPING_GAMMA * self._potential() - phi_before)
 
         reward = (
-            10.0 * (mean_h_after - mean_h_before)
-            + 5.0 * (mean_p_before - mean_p_after)
-            - 0.05
-            + penalty
+            action_reward
+            - TIME_COST
+            - FIELD_PRESSURE_COEF * float(self.pest_grid.mean())
+            + shaping
         )
 
         self.step_count += 1
         terminated = self.battery <= 0.0
         truncated = self.step_count >= self.max_steps
         if terminated:
-            reward -= 2.0
+            reward -= DEATH_PENALTY
+        if (terminated or truncated) and self.is_success:
+            reward += SUCCESS_BONUS
 
         self.last_reward = float(reward)
         self.cum_reward += float(reward)
@@ -124,7 +194,7 @@ class AgriScoutEnv(gym.Env):
         info = self._info()
         if terminated or truncated:
             info["is_success"] = bool(self.is_success)
-            info["mean_final_health"] = mean_h_after
+            info["mean_final_health"] = float(self.health_grid.mean())
             info["water_used"] = self.water_used
         return self._obs(), float(reward), terminated, truncated, info
 
@@ -134,9 +204,27 @@ class AgriScoutEnv(gym.Env):
         c = int(np.clip(round(self.rover_col), 0, self.n_cols - 1))
         return r, c
 
+    def _potential(self) -> float:
+        """Shaping potential Phi(s): negative normalized distance to the nearest
+        high-priority cell (nearest active pest hotspot, else the lowest-health
+        cell). Higher (closer to 0) = rover is nearer to useful work."""
+        r, c = self._cell()
+        pest_cells = np.argwhere(self.pest_grid > NAV_PEST_THRESHOLD)
+        if pest_cells.shape[0] > 0:
+            d = int((np.abs(pest_cells[:, 0] - r) + np.abs(pest_cells[:, 1] - c)).min())
+        else:
+            tr, tc = np.unravel_index(int(np.argmin(self.health_grid)), self.health_grid.shape)
+            d = abs(int(tr) - r) + abs(int(tc) - c)
+        return -float(d) / (self.n_rows + self.n_cols)
+
     def _apply_action(self, name: str) -> float:
-        """Apply the discrete action; return an extra reward penalty (<= 0)."""
-        penalty = 0.0
+        """Apply the discrete action; return the ACTION-ATTRIBUTED reward.
+
+        Positive terms are the agent's direct effect (health added by irrigate,
+        pest removed by spray); negative terms are waste penalties. Passive world
+        dynamics are handled separately in ``_advance_world`` and never rewarded.
+        """
+        reward = 0.0
         r, c = self._cell()
 
         if name in ("MOVE_N", "MOVE_S", "MOVE_E", "MOVE_W"):
@@ -150,7 +238,7 @@ class AgriScoutEnv(gym.Env):
             if 0 <= nr <= self.n_rows - 1 and 0 <= nc <= self.n_cols - 1:
                 self.rover_row, self.rover_col = nr, nc
             else:
-                penalty -= 0.05  # bumped a boundary
+                reward -= WALL_BUMP_PENALTY  # bumped a boundary
             self.rover_heading = heading
             self.battery -= 0.004
 
@@ -162,22 +250,31 @@ class AgriScoutEnv(gym.Env):
                 self.water_used += 0.05
                 self.water = max(0.0, self.water - 0.05)
                 self.irrigation_grid[r, c] = 10
-                if self.health_grid[r, c] > 0.9:
-                    penalty -= 0.05  # watering an already-healthy cell
-                self.health_grid[r, c] = min(1.0, self.health_grid[r, c] + 0.15)
+                before = float(self.health_grid[r, c])
+                if before > 0.9:
+                    reward -= OVERWATER_PENALTY  # watering an already-healthy cell
+                after = min(1.0, before + IRRIGATE_BOOST)
+                self.health_grid[r, c] = after
+                reward += REWARD_IRRIGATE_COEF * (after - before)  # attributed health
                 self.battery -= 0.003
             else:
-                penalty -= 0.10  # no water to give
+                reward -= EMPTY_TANK_PENALTY  # no water to give
 
         elif name == "SPRAY":
             if self.pesticide > 0:
                 self.pesticide = max(0.0, self.pesticide - 0.05)
-                if self.pest_grid[r, c] < 0.05:
-                    penalty -= 0.05  # spraying a clean cell
-                self.pest_grid[r, c] = max(0.0, self.pest_grid[r, c] - 0.5)
+                if float(self.pest_grid[r, c]) < 0.05:
+                    reward -= CLEAN_SPRAY_PENALTY  # spraying an already-clean cell
+                removed = float(self.pest_grid[r, c])  # current cell cleared to 0
+                self.pest_grid[r, c] = 0.0
+                for nr, nc in ((r + 1, c), (r - 1, c), (r, c + 1), (r, c - 1)):
+                    if 0 <= nr < self.n_rows and 0 <= nc < self.n_cols:
+                        removed += 0.5 * float(self.pest_grid[nr, nc])  # halved away
+                        self.pest_grid[nr, nc] *= 0.5
+                reward += REWARD_SPRAY_COEF * removed  # attributed pest removed
                 self.battery -= 0.003
             else:
-                penalty -= 0.10  # no pesticide left
+                reward -= EMPTY_TANK_PENALTY  # no pesticide left
 
         elif name == "RETURN_TO_DEPOT":
             if (r, c) == (0, 0):
@@ -185,25 +282,53 @@ class AgriScoutEnv(gym.Env):
                 self.pesticide = 1.0
                 self.battery = min(1.0, self.battery + 0.30)
             else:
-                penalty -= 0.02  # only useful at the depot
+                reward -= DEPOT_PENALTY  # only useful at the depot
 
         # WAIT: no-op besides the passive drains below.
-        return penalty
+        return reward
+
+    @staticmethod
+    def _shift(a: np.ndarray, dr: int, dc: int) -> np.ndarray:
+        """Return ``out`` where ``out[r, c] = a[r-dr, c-dc]`` (0 past the edges)."""
+        out = np.roll(a, (dr, dc), axis=(0, 1))
+        if dr > 0:
+            out[:dr, :] = 0
+        elif dr < 0:
+            out[dr:, :] = 0
+        if dc > 0:
+            out[:, :dc] = 0
+        elif dc < 0:
+            out[:, dc:] = 0
+        return out
 
     def _advance_world(self, name: str) -> None:
         rng = self.np_random
-        # Pests creep upward everywhere.
-        self.pest_grid = np.clip(
-            self.pest_grid + rng.uniform(0.0, 0.015, self.pest_grid.shape), 0.0, 1.0
-        ).astype(np.float32)
-        # Health decays; pests accelerate decay; irrigation slows it.
-        decay = 0.003 + 0.02 * self.pest_grid
+        pest_pre = self.pest_grid
+        infested = pest_pre > INFEST_THRESHOLD
+
+        # Hotspots grow; then infested cells spread to 4-neighbours (one pass).
+        pest = np.where(infested, pest_pre + HOTSPOT_GROWTH, pest_pre)
+        new_infection = np.zeros_like(pest)
+        for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            src = self._shift(pest_pre, dr, dc)          # infested neighbour severity
+            # Spread probability SATURATES in severity -> bounded, never exponential.
+            prob = SPREAD_COEF * np.minimum(src, SPREAD_SEV_CAP) * (src > INFEST_THRESHOLD)
+            hit = rng.random(pest.shape) < prob
+            new_infection = np.maximum(new_infection, hit * SPREAD_SEED)
+        pest = np.maximum(pest, new_infection)
+        self.pest_grid = np.clip(pest, 0.0, 1.0).astype(np.float32)
+
+        # Health decays (pests accelerate it); irrigated cells decay slower.
+        decay = BASE_DECAY + PEST_DECAY_COEF * self.pest_grid
         irrigated = self.irrigation_grid > 0
-        decay = np.where(irrigated, decay * 0.3, decay)
-        self.health_grid = np.clip(self.health_grid - decay, 0.0, 1.0).astype(np.float32)
-        # Irrigated + low-pest cells recover a little.
-        recover = np.where(irrigated & (self.pest_grid < 0.2), 0.006, 0.0)
-        self.health_grid = np.clip(self.health_grid + recover, 0.0, 1.0).astype(np.float32)
+        decay = np.where(irrigated, decay * IRRIGATED_DECAY_FACTOR, decay)
+        health = self.health_grid - decay
+        # Recovery is gated on LOCAL cell pest only (never the field mean), so a
+        # cleaned cell always heals back -> collapse is non-absorbing / graceful.
+        low_pest = self.pest_grid < LOW_PEST_RECOVER
+        recover = np.where(low_pest, BASE_RECOVER, 0.0)
+        recover = np.where(irrigated & low_pest, RECOVER_RATE, recover)
+        self.health_grid = np.clip(health + recover, 0.0, 1.0).astype(np.float32)
 
         self.irrigation_grid = np.maximum(0, self.irrigation_grid - 1)
         self.battery = max(0.0, self.battery - 0.002)  # passive idle drain
