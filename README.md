@@ -5,9 +5,7 @@ irrigating stressed plants and spraying pest hotspots while managing battery, wa
 and pesticide. I tune, train and compare four algorithms (**DQN, PPO, A2C and a
 from-scratch REINFORCE**) under an identical environment-step budget.
 
-📄 **[REPORT.md](REPORT.md)** is the full write-up, covering environment design, tuning analysis
-per algorithm, the value-based vs policy-gradient comparison, generalization, and
-limitations.
+
 
 ![the episode viewer](assets/figures/demo_viewer.png)
 
