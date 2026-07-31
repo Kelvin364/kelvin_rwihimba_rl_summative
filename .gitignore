@@ -28,16 +28,7 @@ logs/validation/
 !models/pg/a2c.zip
 !models/pg/reinforce.pt
 
-# ---- Build scratch ---------------------------------------------------------
-assets/*.build.html
-assets/demo/*.build.html
-# The PyBullet recording is a 7.6 MB duplicate of the WebGL clip I keep; the
-# interactive viewer (assets/demo/index.html) is the real artefact.
-assets/demo/demo_ppo_seed9003.gif
 
-# ---- Personal working notes ------------------------------------------------
-# My narration plan for the demo video, not part of the deliverable.
-VIDEO_SCRIPT.md
 
 # Single-run viewer produced by `main.py --view web` (index.html is the curated one)
 assets/demo/last_run.html
