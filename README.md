@@ -24,18 +24,36 @@ colour-coded by type. This run finished at +15.78 with 18 treatments and none wa
 ```bash
 uv sync
 
-uv run python main.py --mode evaluate          # score all four agents + references
-uv run python main.py --agent dqn              # watch the best agent live (PyBullet)
-uv run python main.py --agent dqn --view web   # same run in the browser viewer
-uv run pytest -q                               # environment + learnability gates
+uv run python main.py --view web --agent all --seed 42   # ALL agents, one 3D viewer
+uv run python main.py --view web --agent dqn             # one agent in the 3D viewer
+uv run python main.py --mode evaluate                    # score all four agents + references
+uv run pytest -q                                         # environment + learnability gates
 ```
 
-> **Two renderers, and they look different.** `--view pybullet` (the default) opens a
-> live 3D window that steps in time with the terminal output, so you can watch the
-> agent and read its per-step numbers together. `--view web` records the episode and
-> opens my browser viewer instead, which is the better-looking one (real lighting,
-> shadows, treatment effects, scrubbing) but is built after the run rather than
-> streamed live. The screenshot above is the browser viewer.
+> **If `uv sync` fails building pybullet on macOS**, run it once as
+> `CFLAGS=-Dfdopen=fdopen uv sync` and then continue as normal. Nothing in the
+> browser viewer, the training code or the tests imports pybullet — it is only
+> needed by the optional `--view pybullet` renderer — so this affects the install
+> step alone, never the 3D demo.
+
+The first command is the one to run. It replays **every** agent — ppo, dqn, a2c,
+reinforce, plus the oracle and random references — on the *same* seed, builds the 3D
+viewer and opens it, with all six selectable from one dropdown. Any seed works, and
+the same seed always reproduces the same episode:
+
+```bash
+uv run python main.py --view web --agent all --seed 9003
+```
+
+> **Always pass `--view web`, and note it is not the default.** `main.py` defaults
+> to `--view pybullet`, whose live GUI window is unreliable on macOS / Apple
+> Silicon: it can spin without ever showing a window, or drop the physics server
+> mid-episode. The renderer degrades to headless when that happens rather than
+> raising, so the run still finishes and its trace is still written — but you see
+> no 3D at all. Every rendering command in this README passes `--view web` for
+> that reason, and it is the better renderer anyway (real lighting, shadows and
+> treatment effects). If you clone this repo and want to see the agent in 3D,
+> `--view web` is the flag that gets you there.
 
 **The HTML episode viewer is the demo to open first.** It renders the episode in
 WebGL (three.js) with a **3D** and a **Grid** view of the same recorded trace, and

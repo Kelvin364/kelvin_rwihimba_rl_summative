@@ -9,8 +9,23 @@
     uv run main.py --deterministic     # greedy actions instead of sampled
     uv run main.py --mode evaluate     # evaluate all 4 agents (det + stochastic table)
 
+    uv run main.py --view web --agent all --seed 42
+                                       # record every agent on seed 42 and open the
+                                       # browser 3D viewer with all of them in one
+                                       # dropdown -- the reliable 3D path on macOS
+
+    uv run main.py --mode evaluate --seed 42 --n-seeds 20
+                                       # evaluate on an arbitrary seed range
+                                       # (defaults stay 9000-9019, as reported)
+
 Rendering (PyBullet) is imported lazily, ONLY in play mode; evaluate mode stays
 headless/pybullet-free. AGRISCOUT_HEADLESS=1 forces DIRECT (no GUI window).
+
+A note on --view pybullet: PyBullet's live GUI window is unreliable on macOS /
+Apple Silicon -- it can spin without ever showing a window, or drop the physics
+server mid-episode. The renderer now degrades to headless when that happens
+instead of raising, so the run always finishes and its trace is always written,
+but --view web is the 3D renderer to rely on here.
 """
 
 from __future__ import annotations
@@ -29,7 +44,15 @@ MODELS = {
     "a2c": REPO / "models" / "pg" / "a2c.zip",
     "reinforce": REPO / "models" / "pg" / "reinforce.pt",
 }
-EVAL_SEEDS = list(range(9000, 9020))
+TRAINED_AGENTS = ("ppo", "dqn", "a2c", "reinforce")
+SCRIPTED_AGENTS = ("oracle", "random")
+# What `--agent all` expands to: every trained agent, then the two scripted
+# references they are measured against.
+ALL_AGENTS = (*TRAINED_AGENTS, *SCRIPTED_AGENTS)
+# Held-out evaluation seeds. These are the defaults the report numbers were
+# produced with; --seed/--n-seeds override them for exploration.
+EVAL_SEED_BASE = 9000
+EVAL_N_SEEDS = 20
 # GUI playback pacing: each env step is drawn as TWEEN_FRAMES interpolated frames
 # spread over STEP_SECONDS, so the rover glides between cells.
 TWEEN_FRAMES = 6
@@ -42,16 +65,20 @@ class Args:
 
     mode: Literal["play", "evaluate"] = "play"
     """play a rendered episode, or evaluate all four trained agents."""
-    agent: Literal["ppo", "dqn", "a2c", "reinforce", "oracle", "random"] = "ppo"
+    agent: Literal["ppo", "dqn", "a2c", "reinforce", "oracle", "random", "all"] = "ppo"
     """which agent to play (play mode only). 'oracle' and 'random' are the scripted
     reference policies, useful for showing what a perfect or a careless run looks
-    like next to a trained one."""
+    like next to a trained one. 'all' runs every trained agent plus both references
+    on the same seed, which is the side-by-side comparison the write-up uses."""
     episodes: int = 1
     """number of episodes to play."""
     deterministic: bool = False
     """use greedy (argmax) actions instead of sampled/stochastic ones."""
-    seed: int = 0
-    """base RNG seed for the played episodes."""
+    seed: int | None = None
+    """base RNG seed. Defaults to 0 in play mode, and to the held-out evaluation
+    base seed (9000) in evaluate mode."""
+    n_seeds: int = EVAL_N_SEEDS
+    """how many consecutive seeds to evaluate over (evaluate mode only)."""
     step_seconds: float = STEP_SECONDS
     """wall-clock seconds per environment step in the GUI (bigger = slower).
     At the 0.12 default a 150-step episode plays in ~18s; use ~0.5 to slow it to
@@ -141,47 +168,54 @@ def play(args: Args) -> None:
     from environment.agriscout_env import AgriScoutEnv
     from environment.rendering import AgriScoutRenderer, EpisodeRecorder  # lazy: pulls pybullet
 
-    predictor = load_predictor(args.agent)
+    seed = 0 if args.seed is None else args.seed
+    agents = list(ALL_AGENTS) if args.agent == "all" else [args.agent]
+
     env = AgriScoutEnv()
-    if isinstance(predictor, _ScriptedPredictor):
-        predictor.bind(env)
     renderer = AgriScoutRenderer(env, mode="human")  # GUI -> DIRECT fallback inside
     mode_str = "GUI" if renderer.gui else "DIRECT (headless)"
     style = "deterministic" if args.deterministic else "stochastic"
-    print(f"Playing {args.episodes} episode(s) with agent '{args.agent}' "
+    print(f"Playing {args.episodes} episode(s) for {', '.join(agents)} "
           f"[{style} actions], PyBullet {mode_str}\n")
 
     try:
-        for ep in range(args.episodes):
-            obs, _ = env.reset(seed=args.seed + ep)
-            recorder = EpisodeRecorder(
-                run_id=f"demo_{args.agent}_ep{ep}_seed{args.seed + ep}",
-                meta={"env_version": env.ENV_VERSION, "model": args.agent, "seed": args.seed + ep},
-            )
-            renderer.render()
-            done = False
-            print(f"--- episode {ep} (seed {args.seed + ep}) ---")
-            while not done:
-                action = _predict(predictor, obs, args.deterministic)
-                obs, reward, term, trunc, _ = env.step(action)
-                if renderer.gui:
-                    # Sweep alpha 0 -> 1 so the rover glides between cells rather
-                    # than teleporting. Headless runs draw a single committed frame.
-                    for i in range(1, TWEEN_FRAMES + 1):
-                        renderer.render(i / TWEEN_FRAMES)
-                        time.sleep(args.step_seconds / TWEEN_FRAMES)
-                else:
-                    renderer.render()
-                recorder.record(env, action, reward)
-                print(f"  step {env.step_count:3d} | {env.ACTION_NAMES[action]:16s} "
-                      f"| r={reward:+6.2f} | cum={env.cum_reward:+7.2f} "
-                      f"| batt={env.battery:.2f} water={env.water:.2f} "
-                      f"health={env.mean_health:.3f}")
-                done = term or trunc
-            trace = recorder.save()
-            print(f"  -> episode {ep}: return={env.cum_reward:+.2f} "
-                  f"success={env.is_success} final_health={env.mean_health:.3f}")
-            print(f"  -> trace: {trace}\n")
+        for agent in agents:
+            predictor = load_predictor(agent)
+            if isinstance(predictor, _ScriptedPredictor):
+                predictor.bind(env)
+            for ep in range(args.episodes):
+                obs, _ = env.reset(seed=seed + ep)
+                recorder = EpisodeRecorder(
+                    run_id=f"demo_{agent}_ep{ep}_seed{seed + ep}",
+                    meta={"env_version": env.ENV_VERSION, "model": agent, "seed": seed + ep},
+                )
+                renderer.render()
+                done = False
+                print(f"--- {agent} episode {ep} (seed {seed + ep}) ---")
+                while not done:
+                    action = _predict(predictor, obs, args.deterministic)
+                    obs, reward, term, trunc, _ = env.step(action)
+                    # renderer.gui latches false if the viewer window dies mid-run,
+                    # so playback drops to a single committed frame per step and the
+                    # episode still finishes and still writes its trace.
+                    if renderer.gui:
+                        # Sweep alpha 0 -> 1 so the rover glides between cells rather
+                        # than teleporting. Headless runs draw a single committed frame.
+                        for i in range(1, TWEEN_FRAMES + 1):
+                            renderer.render(i / TWEEN_FRAMES)
+                            time.sleep(args.step_seconds / TWEEN_FRAMES)
+                    else:
+                        renderer.render()
+                    recorder.record(env, action, reward)
+                    print(f"  step {env.step_count:3d} | {env.ACTION_NAMES[action]:16s} "
+                          f"| r={reward:+6.2f} | cum={env.cum_reward:+7.2f} "
+                          f"| batt={env.battery:.2f} water={env.water:.2f} "
+                          f"health={env.mean_health:.3f}")
+                    done = term or trunc
+                trace = recorder.save()
+                print(f"  -> {agent} episode {ep}: return={env.cum_reward:+.2f} "
+                      f"success={env.is_success} final_health={env.mean_health:.3f}")
+                print(f"  -> trace: {trace}\n")
     finally:
         renderer.close()
 
@@ -189,18 +223,20 @@ def play(args: Args) -> None:
 # --------------------------------------------------------------------------- #
 # evaluate mode (headless, all agents)
 # --------------------------------------------------------------------------- #
-def evaluate_all() -> None:
+def evaluate_all(seed: int | None = None, n_seeds: int = EVAL_N_SEEDS) -> None:
     from tests.test_oracle import make_random_policy, oracle_policy, run_policy
     from training.sweep import evaluate  # headless; no pybullet
 
-    print(f"Evaluating all 4 agents on held-out seeds {EVAL_SEEDS[0]}-{EVAL_SEEDS[-1]}\n")
+    base = EVAL_SEED_BASE if seed is None else seed
+    eval_seeds = list(range(base, base + n_seeds))
+    print(f"Evaluating all 4 agents on held-out seeds {eval_seeds[0]}-{eval_seeds[-1]}\n")
     print(f"{'agent':12s}{'det reward':>12}{'stoch reward':>14}{'det succ':>10}"
           f"{'stoch succ':>12}{'health':>9}")
     print("-" * 69)
     for algo in ("ppo", "a2c", "dqn", "reinforce"):
         predictor = load_predictor(algo)
-        det = evaluate(predictor, EVAL_SEEDS, deterministic=True)
-        sto = evaluate(predictor, EVAL_SEEDS, deterministic=False)
+        det = evaluate(predictor, eval_seeds, deterministic=True)
+        sto = evaluate(predictor, eval_seeds, deterministic=False)
         print(f"{algo:12s}{det['mean_reward']:>12.2f}{sto['mean_reward']:>14.2f}"
               f"{det['success_rate']:>10.2f}{sto['success_rate']:>12.2f}"
               f"{det['mean_final_health']:>9.3f}")
@@ -210,7 +246,7 @@ def evaluate_all() -> None:
     # I ended up printing the old scale underneath the new results.
     print("-" * 69)
     for name, policy in (("random", make_random_policy()), ("oracle", oracle_policy)):
-        m = run_policy(policy, EVAL_SEEDS)
+        m = run_policy(policy, eval_seeds)
         print(f"{name:12s}{m['mean_reward']:>12.2f}{'':>14}{m['success_rate']:>10.2f}"
               f"{'':>12}{m['mean_final_health']:>9.3f}")
     print("\n(random and oracle are the 0% / 100% reference points for these seeds)")
@@ -230,7 +266,13 @@ def play_web(args: Args) -> None:
     from scripts.make_demo_html import build_episode, render_html
     from scripts.record_episode import record
 
-    traces = [record(args.agent, args.seed + ep) for ep in range(args.episodes)]
+    seed = 0 if args.seed is None else args.seed
+    agents = list(ALL_AGENTS) if args.agent == "all" else [args.agent]
+    # Every agent is replayed on the SAME seed, so the viewer's dropdown compares
+    # policies on one identical field rather than on scenarios of differing luck.
+    traces = [record(agent, seed + ep)
+              for agent in agents
+              for ep in range(args.episodes)]
     # Write to its own file rather than index.html: that one is the curated
     # multi-agent viewer the README links to, and a single-agent run should not
     # quietly replace it.
@@ -250,7 +292,7 @@ def play_web(args: Args) -> None:
 def main() -> None:
     args = tyro.cli(Args)
     if args.mode == "evaluate":
-        evaluate_all()
+        evaluate_all(args.seed, args.n_seeds)
     elif args.view == "web":
         play_web(args)
     else:

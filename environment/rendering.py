@@ -136,7 +136,39 @@ class AgriScoutRenderer:
         wanted = _resolve_mode(mode)
         self.connection_mode = self._connect(wanted)
         self.gui = self.connection_mode == p.GUI
+        # The PyBullet GUI can die *mid-run* (the window is closed, or the macOS
+        # OpenGL backend drops the server). Every later render is then a hard
+        # `pybullet.error: Not connected to physics server`. `alive` latches false
+        # on the first such failure so playback degrades to headless instead of
+        # taking the whole episode down with it.
+        self.alive = True
 
+        # Interpolation state (see _interpolate_pose).
+        self._prev_row = float(_getattr(env, "rover_row", 0.0))
+        self._prev_col = float(_getattr(env, "rover_col", 0.0))
+        self._prev_heading = float(_getattr(env, "rover_heading", 0.0))
+        self._render_row, self._render_col = self._prev_row, self._prev_col
+        self._render_heading = self._prev_heading
+
+        try:
+            self._build_scene()
+        except p.error as exc:
+            # The GUI can drop the server *while the scene is being built*, which
+            # used to abort the whole demo from __init__. Rebuild headless instead:
+            # a DIRECT renderer still drives the episode and its trace.
+            if not self.gui:
+                raise
+            logger.warning(
+                "PyBullet GUI died while building the scene (%s); "
+                "rebuilding headless in DIRECT mode. Use --view web for a 3D "
+                "renderer that does not depend on a PyBullet window.",
+                exc,
+            )
+            self._reconnect_direct()
+            self._build_scene()
+
+    def _build_scene(self) -> None:
+        """(Re)create every body from scratch on the current connection."""
         p.resetSimulation()
         p.setGravity(0, 0, 0)
         if self.gui:
@@ -150,18 +182,23 @@ class AgriScoutRenderer:
         self._pest_bodies: dict[tuple[int, int], int] = {}
         self._debug_text_ids: dict[str, int] = {}
 
-        # Interpolation state (see _interpolate_pose).
-        self._prev_row = float(_getattr(env, "rover_row", 0.0))
-        self._prev_col = float(_getattr(env, "rover_col", 0.0))
-        self._prev_heading = float(_getattr(env, "rover_heading", 0.0))
-        self._render_row, self._render_col = self._prev_row, self._prev_col
-        self._render_heading = self._prev_heading
-
         self._build_static()
         self._build_crops()
         self._build_pests()
         self._build_rover()
         self._setup_camera()
+
+    def _reconnect_direct(self) -> None:
+        """Drop a dead GUI connection and take a fresh headless one."""
+        try:
+            if p.isConnected():
+                p.disconnect()
+        except p.error:
+            pass
+        p.connect(p.DIRECT)
+        self.connection_mode = p.DIRECT
+        self.gui = False
+        self.alive = True
 
     # -- connection ------------------------------------------------------------
     def _connect(self, wanted: int) -> int:
@@ -350,18 +387,43 @@ class AgriScoutRenderer:
         cell: call ``render(a)`` a handful of times per env step with a sweeping
         from 0 to 1 and the rover glides instead of jumping. ``alpha=1`` (the
         default) simply snaps to the current pose and commits it.
+
+        Never raises: if the viewer connection has gone away this becomes a no-op
+        (see :attr:`alive`) so the caller's episode loop runs to completion and
+        still writes its trace.
         """
+        if not self.alive or not p.isConnected():
+            self._mark_dead("physics server is no longer connected")
+            return
+
         env = self.env
         health = np.asarray(_getattr(env, "health_grid", np.ones((self.n_rows, self.n_cols))), dtype=float)
         pest = np.asarray(_getattr(env, "pest_grid", np.zeros((self.n_rows, self.n_cols))), dtype=float)
         irrig = _getattr(env, "irrigation_grid", np.zeros((self.n_rows, self.n_cols)))
         irrig = np.asarray(irrig, dtype=float)
 
-        self._interpolate_pose(float(np.clip(alpha, 0.0, 1.0)))
-        self._update_crops(health, irrig)
-        self._update_pests(pest)
-        self._update_rover()
-        self._update_hud(health)
+        try:
+            self._interpolate_pose(float(np.clip(alpha, 0.0, 1.0)))
+            self._update_crops(health, irrig)
+            self._update_pests(pest)
+            self._update_rover()
+            self._update_hud(health)
+        except p.error as exc:
+            self._mark_dead(str(exc))
+
+    def _mark_dead(self, reason: str) -> None:
+        """Latch the renderer off after the viewer connection is lost."""
+        if not self.alive:
+            return
+        self.alive = False
+        self.gui = False
+        logger.warning(
+            "PyBullet viewer stopped drawing (%s); continuing headless. "
+            "The episode still runs and its trace is still written. "
+            "Use --view web for a 3D renderer that does not depend on a "
+            "PyBullet window.",
+            reason,
+        )
 
     def _update_crops(self, health: np.ndarray, irrig: np.ndarray) -> None:
         for (r, c), bid in self._crop_bodies.items():

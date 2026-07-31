@@ -6,7 +6,7 @@ oracle it is being measured against.
 
     uv run python scripts/record_episode.py --agent ppo --seed 7
     uv run python scripts/record_episode.py --agent oracle --seed 7
-    uv run python scripts/record_episode.py --all --seed 7   # ppo + oracle + random
+    uv run python scripts/record_episode.py --agent all --seed 7   # every agent
 """
 
 from __future__ import annotations
@@ -87,13 +87,13 @@ def record(agent: str, seed: int, out_dir: Path | None = None) -> Path:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--agent", choices=[*TRAINED, *SCRIPTED], default="ppo")
+    ap.add_argument("--agent", choices=[*TRAINED, *SCRIPTED, "all"], default="ppo")
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--all", action="store_true",
-                    help="record ppo + oracle + random for side-by-side comparison")
+                    help="record every trained agent plus both scripted references")
     args = ap.parse_args()
 
-    agents = ["ppo", "oracle", "random"] if args.all else [args.agent]
+    agents = list(TRAINED + SCRIPTED) if (args.all or args.agent == "all") else [args.agent]
     for agent in agents:
         record(agent, args.seed)
 
